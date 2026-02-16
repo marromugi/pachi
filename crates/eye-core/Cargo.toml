@@ -1,0 +1,18 @@
+[package]
+name = "eye"
+version = "0.1.0"
+edition.workspace = true
+
+[dependencies]
+wgpu = "24"
+bytemuck = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+winit = "0.30"
+pollster = "0.4"
+env_logger = "0.11"
+log = "0.4"
+
+[[example]]
+name = "desktop"
+path = "../../examples/desktop.rs"
