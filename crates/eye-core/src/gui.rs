@@ -22,8 +22,8 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
                 .default_open(true)
                 .show(ui, |ui| {
                     eye_shape_editor(ui, eye_shape);
-                    if ui.button("Reset Circle").clicked() {
-                        eye_shape.open = crate::outline::BezierOutline::circle(0.30);
+                    if ui.button("Reset Ellipse").clicked() {
+                        eye_shape.open = crate::outline::BezierOutline::ellipse(0.20, 0.35);
                     }
                 });
 

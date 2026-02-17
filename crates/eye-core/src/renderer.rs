@@ -60,8 +60,8 @@ impl Default for EyeUniforms {
             _pad3: 0.0,
 
             // Bezier outline
-            outline_open: BezierOutline::circle(0.30).to_uniform_array(),
-            outline_closed: BezierOutline::closed_slit_asymmetric(0.30, -0.20).to_uniform_array(),
+            outline_open: BezierOutline::ellipse(0.20, 0.35).to_uniform_array(),
+            outline_closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20).to_uniform_array(),
         }
     }
 }

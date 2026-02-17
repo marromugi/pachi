@@ -55,32 +55,38 @@ pub struct BezierOutline {
 impl BezierOutline {
     /// Create a circle approximation with the given radius.
     pub fn circle(radius: f32) -> Self {
-        let h = radius * KAPPA;
+        Self::ellipse(radius, radius)
+    }
+
+    /// Create an ellipse approximation with separate horizontal and vertical radii.
+    pub fn ellipse(rx: f32, ry: f32) -> Self {
+        let hx = rx * KAPPA;
+        let hy = ry * KAPPA;
         Self {
             anchors: [
-                // Left (-r, 0): handle_in goes down, handle_out goes up
+                // Left (-rx, 0): handle_in goes down, handle_out goes up
                 BezierAnchor {
-                    position: [-radius, 0.0],
-                    handle_in: [0.0, -h],
-                    handle_out: [0.0, h],
+                    position: [-rx, 0.0],
+                    handle_in: [0.0, -hy],
+                    handle_out: [0.0, hy],
                 },
-                // Top (0, r): handle_in goes left, handle_out goes right
+                // Top (0, ry): handle_in goes left, handle_out goes right
                 BezierAnchor {
-                    position: [0.0, radius],
-                    handle_in: [-h, 0.0],
-                    handle_out: [h, 0.0],
+                    position: [0.0, ry],
+                    handle_in: [-hx, 0.0],
+                    handle_out: [hx, 0.0],
                 },
-                // Right (r, 0): handle_in goes up, handle_out goes down
+                // Right (rx, 0): handle_in goes up, handle_out goes down
                 BezierAnchor {
-                    position: [radius, 0.0],
-                    handle_in: [0.0, h],
-                    handle_out: [0.0, -h],
+                    position: [rx, 0.0],
+                    handle_in: [0.0, hy],
+                    handle_out: [0.0, -hy],
                 },
-                // Bottom (0, -r): handle_in goes right, handle_out goes left
+                // Bottom (0, -ry): handle_in goes right, handle_out goes left
                 BezierAnchor {
-                    position: [0.0, -radius],
-                    handle_in: [h, 0.0],
-                    handle_out: [-h, 0.0],
+                    position: [0.0, -ry],
+                    handle_in: [hx, 0.0],
+                    handle_out: [-hx, 0.0],
                 },
             ],
         }
@@ -257,8 +263,8 @@ pub struct EyeShape {
 impl Default for EyeShape {
     fn default() -> Self {
         Self {
-            open: BezierOutline::circle(0.30),
-            closed: BezierOutline::closed_slit_asymmetric(0.30, -0.20),
+            open: BezierOutline::ellipse(0.20, 0.35),
+            closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20),
         }
     }
 }
