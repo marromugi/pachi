@@ -1,3 +1,6 @@
 pub mod renderer;
 
-pub use renderer::{EyeParams, EyeRenderer};
+#[cfg(feature = "gui")]
+pub mod gui;
+
+pub use renderer::{EyeRenderer, EyeUniforms};
