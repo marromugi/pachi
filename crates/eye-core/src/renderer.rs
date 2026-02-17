@@ -1,3 +1,5 @@
+use crate::outline::BezierOutline;
+
 /// GPU uniform structure for a single canonical eye.
 /// The shader mirrors the X coordinate to render two eyes.
 ///
@@ -38,8 +40,17 @@ pub struct EyeUniforms {
     pub time: f32,                   // offset 116
     pub eyelid_close: f32,           // offset 120 | 0.0 = open, 1.0 = closed
     pub show_iris_pupil: f32,        // offset 124 | 1.0 = show, 0.0 = hide
+
+    // -- Bezier outline open -- (128 bytes, offset 128)
+    // 4 segments × 2 vec4f each. Each vec4f packs 2 vec2f control points.
+    // seg[i*2]   = (P0.xy, P1.xy) = (anchor, anchor+handle_out)
+    // seg[i*2+1] = (P2.xy, P3.xy) = (next_anchor+handle_in, next_anchor)
+    pub outline_open: [[f32; 4]; 8],
+
+    // -- Bezier outline closed -- (128 bytes, offset 256)
+    pub outline_closed: [[f32; 4]; 8],
 }
-// Total: 128 bytes (= 16 * 8)
+// Total: 384 bytes (= 16 * 24)
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -73,6 +84,10 @@ impl Default for EyeUniforms {
             time: 0.0,
             eyelid_close: 0.2,
             show_iris_pupil: 1.0,
+
+            // Bezier outline
+            outline_open: BezierOutline::circle(0.30).to_uniform_array(),
+            outline_closed: BezierOutline::closed_slit_asymmetric(0.30, -0.20).to_uniform_array(),
         }
     }
 }

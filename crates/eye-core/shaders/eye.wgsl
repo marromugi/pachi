@@ -1,6 +1,7 @@
 // ============================================================
 // Eye SDF Shader
-// Renders two eyes (left mirrored from right) using SDFs.
+// Renders two eyes (left mirrored from right) using cubic
+// Bezier outline for eye shape + SDF circles for iris/pupil.
 // ============================================================
 
 struct Uniforms {
@@ -33,6 +34,13 @@ struct Uniforms {
     time: f32,
     eyelid_close: f32,
     show_iris_pupil: f32,
+
+    // Bezier outline: open state (128 bytes)
+    // 4 segments × 2 vec4f. Each vec4f packs 2 vec2f control points.
+    outline_open: array<vec4f, 8>,
+
+    // Bezier outline: closed state (128 bytes)
+    outline_closed: array<vec4f, 8>,
 }
 
 @group(0) @binding(0)
@@ -44,39 +52,10 @@ struct VertexOutput {
 }
 
 // ============================================================
-// Fixed eye shape constants
+// Constants
 // ============================================================
 
-const SCLERA_SIZE = vec2f(0.30, 0.30);
-
-// ============================================================
-// Eyelid Bezier interpolation
-// ============================================================
-
-struct EyelidPoints {
-    upper_p0: vec2f,
-    upper_p1: vec2f,
-    upper_p2: vec2f,
-    lower_p0: vec2f,
-    lower_p1: vec2f,
-    lower_p2: vec2f,
-}
-
-fn compute_eyelid(t: f32) -> EyelidPoints {
-    // Open: upper corners above circle, lower corners below → no clipping → perfect circle
-    // Closed: both converge to the lower meeting line (y ≈ -0.15)
-    let upper_corner_y = mix(0.20, -0.15, t);
-    let lower_corner_y = mix(-0.20, -0.15, t);
-
-    var pts: EyelidPoints;
-    pts.upper_p0 = vec2f(-0.35, upper_corner_y);
-    pts.upper_p1 = vec2f(0.0, mix(0.40, -0.18, t));
-    pts.upper_p2 = vec2f(0.35, upper_corner_y);
-    pts.lower_p0 = vec2f(-0.35, lower_corner_y);
-    pts.lower_p1 = vec2f(0.0, mix(-0.40, -0.18, t));
-    pts.lower_p2 = vec2f(0.35, lower_corner_y);
-    return pts;
-}
+const SUBDIV: u32 = 32u;
 
 // ============================================================
 // Vertex shader: fullscreen triangle
@@ -95,29 +74,87 @@ fn vs_main(@builtin(vertex_index) id: u32) -> VertexOutput {
 // SDF primitives
 // ============================================================
 
-fn sd_ellipse(p: vec2f, ab: vec2f) -> f32 {
-    let q = abs(p);
-    let k = length(q / ab);
-    if k < 0.0001 {
-        return -min(ab.x, ab.y);
-    }
-    return (k - 1.0) * min(ab.x, ab.y);
-}
-
 fn sd_circle(p: vec2f, r: f32) -> f32 {
     return length(p) - r;
 }
 
 // ============================================================
-// Quadratic bezier: evaluate Y at a given X.
-// Assumes the curve is roughly horizontal (monotonic in X).
+// Cubic Bezier evaluation
 // ============================================================
 
-fn bezier_y_at_x(x: f32, p0: vec2f, p1: vec2f, p2: vec2f) -> f32 {
-    let dx = p2.x - p0.x;
-    let t = clamp((x - p0.x) / (dx + sign(dx) * 0.0001), 0.0, 1.0);
+fn cubic_bezier(t: f32, p0: vec2f, p1: vec2f, p2: vec2f, p3: vec2f) -> vec2f {
     let omt = 1.0 - t;
-    return omt * omt * p0.y + 2.0 * omt * t * p1.y + t * t * p2.y;
+    let omt2 = omt * omt;
+    let t2 = t * t;
+    return omt2 * omt * p0 + 3.0 * omt2 * t * p1 + 3.0 * omt * t2 * p2 + t2 * t * p3;
+}
+
+// ============================================================
+// Point-to-segment distance squared + winding number contribution
+// Returns vec2f(distance_squared, winding)
+// ============================================================
+
+fn point_segment_test(p: vec2f, a: vec2f, b: vec2f) -> vec2f {
+    let e = b - a;
+    let w = p - a;
+    let t = clamp(dot(w, e) / dot(e, e), 0.0, 1.0);
+    let d = w - e * t;
+    let d2 = dot(d, d);
+
+    // Winding number contribution
+    var winding = 0.0;
+    if a.y <= p.y {
+        if b.y > p.y {
+            if e.x * w.y - e.y * w.x > 0.0 {
+                winding = 1.0;
+            }
+        }
+    } else {
+        if b.y <= p.y {
+            if e.x * w.y - e.y * w.x < 0.0 {
+                winding = -1.0;
+            }
+        }
+    }
+    return vec2f(d2, winding);
+}
+
+// ============================================================
+// Evaluate eye outline: returns signed distance
+// (negative = inside, positive = outside)
+// ============================================================
+
+fn eval_outline(p: vec2f, close_t: f32) -> f32 {
+    var min_d2 = 1e10;
+    var winding = 0.0;
+
+    for (var seg = 0u; seg < 4u; seg++) {
+        let idx = seg * 2u;
+
+        // Interpolate between open and closed control points
+        let cp0 = mix(u.outline_open[idx], u.outline_closed[idx], close_t);
+        let cp1 = mix(u.outline_open[idx + 1u], u.outline_closed[idx + 1u], close_t);
+
+        let P0 = cp0.xy;
+        let P1 = cp0.zw;
+        let P2 = cp1.xy;
+        let P3 = cp1.zw;
+
+        var prev = P0;
+        for (var i = 1u; i <= SUBDIV; i++) {
+            let t = f32(i) / f32(SUBDIV);
+            let curr = cubic_bezier(t, P0, P1, P2, P3);
+            let result = point_segment_test(p, prev, curr);
+            min_d2 = min(min_d2, result.x);
+            winding += result.y;
+            prev = curr;
+        }
+    }
+
+    let dist = sqrt(min_d2);
+    // winding != 0 means inside
+    let sign_val = select(1.0, -1.0, winding != 0.0);
+    return dist * sign_val;
 }
 
 // ============================================================
@@ -176,12 +213,12 @@ fn iris_pattern(p: vec2f, radius: f32, noise_scale: f32) -> f32 {
 fn render_eye(p: vec2f, mirror: f32) -> vec4f {
     let local_p = vec2f(p.x * mirror, p.y);
 
-    // --- Sclera (fixed oval shape) ---
-    let d_sclera = sd_ellipse(local_p, SCLERA_SIZE);
-    let aa_s = fwidth(d_sclera) * 0.5;
-    let sclera_mask = 1.0 - smoothstep(-aa_s, aa_s, d_sclera);
+    // --- Outline (replaces sclera ellipse + eyelid clipping) ---
+    let d_outline = eval_outline(local_p, u.eyelid_close);
+    let aa = fwidth(d_outline) * 0.5;
+    let outline_mask = 1.0 - smoothstep(-aa, aa, d_outline);
 
-    if sclera_mask < 0.001 {
+    if outline_mask < 0.001 {
         return vec4f(0.0, 0.0, 0.0, 0.0);
     }
 
@@ -215,18 +252,7 @@ fn render_eye(p: vec2f, mirror: f32) -> vec4f {
     let hl_mask = 1.0 - smoothstep(-aa_h, aa_h, d_hl);
     eye_color = eye_color + vec3f(u.highlight_intensity * hl_mask);
 
-    // --- Eyelid clipping (computed from eyelid_close) ---
-    let lid = compute_eyelid(u.eyelid_close);
-    let upper_y = bezier_y_at_x(local_p.x, lid.upper_p0, lid.upper_p1, lid.upper_p2);
-    let lower_y = bezier_y_at_x(local_p.x, lid.lower_p0, lid.lower_p1, lid.lower_p2);
-    let lid_aa = fwidth(local_p.y) * 1.5;
-    let lid_mask = smoothstep(-lid_aa, lid_aa, upper_y - local_p.y)
-                 * smoothstep(-lid_aa, lid_aa, local_p.y - lower_y);
-
-    // Final alpha
-    let alpha = sclera_mask * lid_mask;
-
-    return vec4f(eye_color, alpha);
+    return vec4f(eye_color, outline_mask);
 }
 
 // ============================================================
