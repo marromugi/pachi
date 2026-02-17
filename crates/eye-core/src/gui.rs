@@ -16,11 +16,6 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
             );
             ui.checkbox(auto_blink, "Auto Blink");
 
-            let mut show = uniforms.show_iris_pupil > 0.5;
-            if ui.checkbox(&mut show, "Show Iris & Pupil").changed() {
-                uniforms.show_iris_pupil = if show { 1.0 } else { 0.0 };
-            }
-
             ui.separator();
 
             egui::CollapsingHeader::new("Eye Shape")
@@ -49,18 +44,6 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
                         ui.label("Sclera Color");
                         color_edit_rgb(ui, &mut uniforms.sclera_color);
                     });
-                    ui.horizontal(|ui| {
-                        ui.label("Iris Inner");
-                        color_edit_rgb(ui, &mut uniforms.iris_color_inner);
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Iris Outer");
-                        color_edit_rgb(ui, &mut uniforms.iris_color_outer);
-                    });
-                    ui.add(
-                        egui::Slider::new(&mut uniforms.iris_noise_scale, 1.0..=20.0)
-                            .text("Iris Noise"),
-                    );
                 });
 
             ui.separator();

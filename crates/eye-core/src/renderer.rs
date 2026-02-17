@@ -15,42 +15,29 @@ pub struct EyeUniforms {
     pub sclera_color: [f32; 3],      // offset 0   | vec3f
     pub squash_stretch: f32,         // offset 12  | >0 = squash, <0 = stretch
 
-    // -- Iris -- (48 bytes, offset 16)
-    pub iris_offset: [f32; 2],       // offset 16  | vec2f (gaze drives this)
-    pub iris_radius: f32,            // offset 24
-    pub iris_noise_scale: f32,       // offset 28
-    pub iris_color_inner: [f32; 3],  // offset 32  | vec3f
-    pub _pad1: f32,                  // offset 44
-    pub iris_color_outer: [f32; 3],  // offset 48  | vec3f
-    pub _pad2: f32,                  // offset 60
+    // -- Highlight -- (16 bytes, offset 16)
+    pub highlight_offset: [f32; 2],  // offset 16  | vec2f
+    pub highlight_radius: f32,       // offset 24
+    pub highlight_intensity: f32,    // offset 28
 
-    // -- Pupil -- (16 bytes, offset 64)
-    pub pupil_color: [f32; 3],       // offset 64  | vec3f
-    pub pupil_radius: f32,           // offset 76
+    // -- Global -- (32 bytes, offset 32)
+    pub bg_color: [f32; 3],          // offset 32  | vec3f
+    pub eye_separation: f32,         // offset 44
+    pub aspect_ratio: f32,           // offset 48
+    pub time: f32,                   // offset 52
+    pub eyelid_close: f32,           // offset 56  | 0.0 = open, 1.0 = closed
+    pub _pad3: f32,                  // offset 60
 
-    // -- Highlight -- (16 bytes, offset 80)
-    pub highlight_offset: [f32; 2],  // offset 80  | vec2f
-    pub highlight_radius: f32,       // offset 88
-    pub highlight_intensity: f32,    // offset 92
-
-    // -- Global -- (32 bytes, offset 96)
-    pub bg_color: [f32; 3],          // offset 96  | vec3f
-    pub eye_separation: f32,         // offset 108
-    pub aspect_ratio: f32,           // offset 112
-    pub time: f32,                   // offset 116
-    pub eyelid_close: f32,           // offset 120 | 0.0 = open, 1.0 = closed
-    pub show_iris_pupil: f32,        // offset 124 | 1.0 = show, 0.0 = hide
-
-    // -- Bezier outline open -- (128 bytes, offset 128)
+    // -- Bezier outline open -- (128 bytes, offset 64)
     // 4 segments × 2 vec4f each. Each vec4f packs 2 vec2f control points.
     // seg[i*2]   = (P0.xy, P1.xy) = (anchor, anchor+handle_out)
     // seg[i*2+1] = (P2.xy, P3.xy) = (next_anchor+handle_in, next_anchor)
     pub outline_open: [[f32; 4]; 8],
 
-    // -- Bezier outline closed -- (128 bytes, offset 256)
+    // -- Bezier outline closed -- (128 bytes, offset 192)
     pub outline_closed: [[f32; 4]; 8],
 }
-// Total: 384 bytes (= 16 * 24)
+// Total: 320 bytes (= 16 * 20)
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -58,19 +45,6 @@ impl Default for EyeUniforms {
             // Sclera
             sclera_color: [0.95, 0.95, 0.95],
             squash_stretch: 0.0,
-
-            // Iris
-            iris_offset: [0.0, 0.0],
-            iris_radius: 0.14,
-            iris_noise_scale: 8.0,
-            iris_color_inner: [0.35, 0.20, 0.08],
-            _pad1: 0.0,
-            iris_color_outer: [0.12, 0.07, 0.03],
-            _pad2: 0.0,
-
-            // Pupil
-            pupil_color: [0.02, 0.02, 0.02],
-            pupil_radius: 0.055,
 
             // Highlight
             highlight_offset: [-0.04, 0.06],
@@ -83,7 +57,7 @@ impl Default for EyeUniforms {
             aspect_ratio: 16.0 / 9.0,
             time: 0.0,
             eyelid_close: 0.2,
-            show_iris_pupil: 0.0,
+            _pad3: 0.0,
 
             // Bezier outline
             outline_open: BezierOutline::circle(0.30).to_uniform_array(),
