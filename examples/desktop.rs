@@ -1,6 +1,8 @@
 use std::sync::Arc;
+use std::time::Instant;
 
-use eye::EyeRenderer;
+use eye::gui::eye_control_panel;
+use eye::{EyeRenderer, EyeUniforms};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -18,6 +20,13 @@ struct AppState {
     surface: wgpu::Surface<'static>,
     surface_config: wgpu::SurfaceConfiguration,
     renderer: EyeRenderer,
+    uniforms: EyeUniforms,
+    start_time: Instant,
+
+    // egui
+    egui_ctx: egui::Context,
+    egui_state: egui_winit::State,
+    egui_renderer: egui_wgpu::Renderer,
 }
 
 impl ApplicationHandler for App {
@@ -31,7 +40,7 @@ impl ApplicationHandler for App {
                 .create_window(
                     Window::default_attributes()
                         .with_title("Eye")
-                        .with_inner_size(winit::dpi::LogicalSize::new(960, 540)),
+                        .with_inner_size(winit::dpi::LogicalSize::new(1280, 720)),
                 )
                 .unwrap(),
         );
@@ -81,6 +90,19 @@ impl ApplicationHandler for App {
             surface.configure(&device, &surface_config);
 
             let renderer = EyeRenderer::new(&device, format);
+            let uniforms = EyeUniforms::default();
+
+            // egui setup
+            let egui_ctx = egui::Context::default();
+            let egui_state = egui_winit::State::new(
+                egui_ctx.clone(),
+                egui_ctx.viewport_id(),
+                &window,
+                Some(window.scale_factor() as f32),
+                None,
+                None,
+            );
+            let egui_renderer = egui_wgpu::Renderer::new(&device, format, None, 1, false);
 
             AppState {
                 window,
@@ -89,6 +111,11 @@ impl ApplicationHandler for App {
                 surface,
                 surface_config,
                 renderer,
+                uniforms,
+                start_time: Instant::now(),
+                egui_ctx,
+                egui_state,
+                egui_renderer,
             }
         });
 
@@ -104,6 +131,12 @@ impl ApplicationHandler for App {
         let Some(state) = &mut self.state else {
             return;
         };
+
+        // Pass events to egui first
+        let egui_response = state.egui_state.on_window_event(&state.window, &event);
+        if egui_response.consumed {
+            return;
+        }
 
         match event {
             WindowEvent::CloseRequested => {
@@ -143,6 +176,37 @@ impl ApplicationHandler for App {
                     }
                 };
 
+                // Update dynamic uniforms
+                state.uniforms.aspect_ratio =
+                    state.surface_config.width as f32 / state.surface_config.height as f32;
+                state.uniforms.time = state.start_time.elapsed().as_secs_f32();
+
+                // --- egui frame ---
+                let raw_input = state.egui_state.take_egui_input(&state.window);
+                let full_output = state.egui_ctx.run(raw_input, |ctx| {
+                    eye_control_panel(ctx, &mut state.uniforms);
+                });
+
+                state
+                    .egui_state
+                    .handle_platform_output(&state.window, full_output.platform_output);
+
+                let paint_jobs = state
+                    .egui_ctx
+                    .tessellate(full_output.shapes, full_output.pixels_per_point);
+
+                // Update egui textures
+                for (id, delta) in &full_output.textures_delta.set {
+                    state
+                        .egui_renderer
+                        .update_texture(&state.device, &state.queue, *id, delta);
+                }
+
+                let screen_descriptor = egui_wgpu::ScreenDescriptor {
+                    size_in_pixels: [state.surface_config.width, state.surface_config.height],
+                    pixels_per_point: state.window.scale_factor() as f32,
+                };
+
                 let view = output
                     .texture
                     .create_view(&wgpu::TextureViewDescriptor::default());
@@ -153,12 +217,54 @@ impl ApplicationHandler for App {
                             label: Some("eye_encoder"),
                         });
 
-                state.renderer.render(
-                    &mut encoder,
-                    &view,
+                // Update egui buffers
+                state.egui_renderer.update_buffers(
+                    &state.device,
                     &state.queue,
-                    (state.surface_config.width, state.surface_config.height),
+                    &mut encoder,
+                    &paint_jobs,
+                    &screen_descriptor,
                 );
+
+                // Render eye + egui overlay in same pass
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("eye_render_pass"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        depth_stencil_attachment: None,
+                        timestamp_writes: None,
+                        occlusion_query_set: None,
+                    });
+
+                    // Draw eye
+                    state.queue.write_buffer(
+                        state.renderer.uniform_buffer(),
+                        0,
+                        bytemuck::bytes_of(&state.uniforms),
+                    );
+                    pass.set_pipeline(state.renderer.pipeline());
+                    pass.set_bind_group(0, state.renderer.bind_group(), &[]);
+                    pass.draw(0..3, 0..1);
+
+                    // Draw egui overlay
+                    state.egui_renderer.render(
+                        &mut pass.forget_lifetime(),
+                        &paint_jobs,
+                        &screen_descriptor,
+                    );
+                }
+
+                // Free egui textures
+                for id in &full_output.textures_delta.free {
+                    state.egui_renderer.free_texture(id);
+                }
 
                 state.queue.submit(std::iter::once(encoder.finish()));
                 output.present();
