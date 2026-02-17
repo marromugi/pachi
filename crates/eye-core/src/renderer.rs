@@ -37,7 +37,7 @@ pub struct EyeUniforms {
     pub aspect_ratio: f32,           // offset 112
     pub time: f32,                   // offset 116
     pub eyelid_close: f32,           // offset 120 | 0.0 = open, 1.0 = closed
-    pub _pad3: f32,                  // offset 124
+    pub show_iris_pupil: f32,        // offset 124 | 1.0 = show, 0.0 = hide
 }
 // Total: 128 bytes (= 16 * 8)
 
@@ -72,7 +72,7 @@ impl Default for EyeUniforms {
             aspect_ratio: 16.0 / 9.0,
             time: 0.0,
             eyelid_close: 0.2,
-            _pad3: 0.0,
+            show_iris_pupil: 1.0,
         }
     }
 }

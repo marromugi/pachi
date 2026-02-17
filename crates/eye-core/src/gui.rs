@@ -13,6 +13,11 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms) {
                 egui::Slider::new(&mut uniforms.eyelid_close, 0.0..=1.0).text("Eyelid Close"),
             );
 
+            let mut show = uniforms.show_iris_pupil > 0.5;
+            if ui.checkbox(&mut show, "Show Iris & Pupil").changed() {
+                uniforms.show_iris_pupil = if show { 1.0 } else { 0.0 };
+            }
+
             ui.separator();
 
             egui::CollapsingHeader::new("Appearance")

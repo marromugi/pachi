@@ -32,7 +32,7 @@ struct Uniforms {
     aspect_ratio: f32,
     time: f32,
     eyelid_close: f32,
-    _pad3: f32,
+    show_iris_pupil: f32,
 }
 
 @group(0) @binding(0)
@@ -204,8 +204,9 @@ fn render_eye(p: vec2f, mirror: f32) -> vec4f {
 
     // --- Compose eye content ---
     var eye_color = u.sclera_color;
-    eye_color = mix(eye_color, iris_col, iris_mask);
-    eye_color = mix(eye_color, u.pupil_color, pupil_mask);
+    let ip_vis = u.show_iris_pupil;
+    eye_color = mix(eye_color, iris_col, iris_mask * ip_vis);
+    eye_color = mix(eye_color, u.pupil_color, pupil_mask * ip_vis);
 
     // --- Highlight (additive, over everything) ---
     let hl_p = iris_p - u.highlight_offset;
