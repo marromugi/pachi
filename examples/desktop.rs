@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use eye::gui::eye_control_panel;
-use eye::{EyeRenderer, EyeShape, EyeUniforms};
+use eye::{BlinkAnimation, EyeRenderer, EyeShape, EyeUniforms};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -22,6 +22,8 @@ struct AppState {
     renderer: EyeRenderer,
     uniforms: EyeUniforms,
     eye_shape: EyeShape,
+    blink_animation: BlinkAnimation,
+    auto_blink: bool,
     start_time: Instant,
 
     // egui
@@ -115,6 +117,8 @@ impl ApplicationHandler for App {
                 renderer,
                 uniforms,
                 eye_shape,
+                blink_animation: BlinkAnimation::sample(),
+                auto_blink: true,
                 start_time: Instant::now(),
                 egui_ctx,
                 egui_state,
@@ -184,6 +188,11 @@ impl ApplicationHandler for App {
                     state.surface_config.width as f32 / state.surface_config.height as f32;
                 state.uniforms.time = state.start_time.elapsed().as_secs_f32();
 
+                if state.auto_blink {
+                    state.uniforms.eyelid_close =
+                        state.blink_animation.evaluate(state.uniforms.time);
+                }
+
                 // Sync eye shape into uniforms
                 state.uniforms.outline_open = state.eye_shape.open.to_uniform_array();
                 state.uniforms.outline_closed = state.eye_shape.closed.to_uniform_array();
@@ -191,7 +200,7 @@ impl ApplicationHandler for App {
                 // --- egui frame ---
                 let raw_input = state.egui_state.take_egui_input(&state.window);
                 let full_output = state.egui_ctx.run(raw_input, |ctx| {
-                    eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape);
+                    eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape, &mut state.auto_blink);
                 });
 
                 state

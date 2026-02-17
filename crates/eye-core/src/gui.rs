@@ -3,16 +3,18 @@ use egui;
 use crate::outline::EyeShape;
 use crate::EyeUniforms;
 
-pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape) {
+pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, auto_blink: &mut bool) {
     egui::SidePanel::right("eye_controls")
         .default_width(280.0)
         .show(ctx, |ui| {
             ui.heading("Eye Controls");
             ui.separator();
 
-            ui.add(
+            ui.add_enabled(
+                !*auto_blink,
                 egui::Slider::new(&mut uniforms.eyelid_close, 0.0..=1.0).text("Eyelid Close"),
             );
+            ui.checkbox(auto_blink, "Auto Blink");
 
             let mut show = uniforms.show_iris_pupil > 0.5;
             if ui.checkbox(&mut show, "Show Iris & Pupil").changed() {
