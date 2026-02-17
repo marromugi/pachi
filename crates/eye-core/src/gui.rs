@@ -3,7 +3,7 @@ use egui;
 use crate::outline::EyeShape;
 use crate::EyeUniforms;
 
-pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, auto_blink: &mut bool) {
+pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, auto_blink: &mut bool, follow_mouse: &mut bool) {
     egui::SidePanel::right("eye_controls")
         .default_width(280.0)
         .show(ctx, |ui| {
@@ -15,6 +15,30 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
                 egui::Slider::new(&mut uniforms.eyelid_close, 0.0..=1.0).text("Eyelid Close"),
             );
             ui.checkbox(auto_blink, "Auto Blink");
+
+            ui.separator();
+
+            egui::CollapsingHeader::new("3D Perspective")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.checkbox(follow_mouse, "Follow Mouse");
+                    ui.add_enabled(
+                        !*follow_mouse,
+                        egui::Slider::new(&mut uniforms.look_x, -1.0..=1.0).text("Look X"),
+                    );
+                    ui.add_enabled(
+                        !*follow_mouse,
+                        egui::Slider::new(&mut uniforms.look_y, -1.0..=1.0).text("Look Y"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut uniforms.max_angle, 0.0..=1.5)
+                            .text("Max Angle"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut uniforms.eye_angle, 0.05..=1.2)
+                            .text("Eye Angle"),
+                    );
+                });
 
             ui.separator();
 

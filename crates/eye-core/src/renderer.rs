@@ -26,18 +26,24 @@ pub struct EyeUniforms {
     pub aspect_ratio: f32,           // offset 48
     pub time: f32,                   // offset 52
     pub eyelid_close: f32,           // offset 56  | 0.0 = open, 1.0 = closed
-    pub _pad3: f32,                  // offset 60
+    pub look_x: f32,                 // offset 60  | [-1, 1] horizontal gaze
 
-    // -- Bezier outline open -- (128 bytes, offset 64)
-    // 4 segments × 2 vec4f each. Each vec4f packs 2 vec2f control points.
+    // -- Perspective -- (16 bytes, offset 64)
+    pub look_y: f32,                 // offset 64  | [-1, 1] vertical gaze
+    pub max_angle: f32,              // offset 68  | max rotation angle (radians)
+    pub eye_angle: f32,              // offset 72  | eye angular half-separation (radians)
+    pub _pad_perspective: f32,       // offset 76
+
+    // -- Bezier outline open -- (128 bytes, offset 80)
+    // 4 segments x 2 vec4f each. Each vec4f packs 2 vec2f control points.
     // seg[i*2]   = (P0.xy, P1.xy) = (anchor, anchor+handle_out)
     // seg[i*2+1] = (P2.xy, P3.xy) = (next_anchor+handle_in, next_anchor)
     pub outline_open: [[f32; 4]; 8],
 
-    // -- Bezier outline closed -- (128 bytes, offset 192)
+    // -- Bezier outline closed -- (128 bytes, offset 208)
     pub outline_closed: [[f32; 4]; 8],
 }
-// Total: 320 bytes (= 16 * 20)
+// Total: 336 bytes (= 16 * 21)
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -57,7 +63,13 @@ impl Default for EyeUniforms {
             aspect_ratio: 16.0 / 9.0,
             time: 0.0,
             eyelid_close: 0.2,
-            _pad3: 0.0,
+            look_x: 0.0,
+
+            // Perspective
+            look_y: 0.0,
+            max_angle: 0.5,
+            eye_angle: 0.8,
+            _pad_perspective: 0.0,
 
             // Bezier outline
             outline_open: BezierOutline::ellipse(0.20, 0.35).to_uniform_array(),

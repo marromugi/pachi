@@ -20,7 +20,13 @@ struct Uniforms {
     aspect_ratio: f32,
     time: f32,
     eyelid_close: f32,
-    _pad3: f32,
+    look_x: f32,
+
+    // Perspective (16 bytes)
+    look_y: f32,
+    max_angle: f32,
+    eye_angle: f32,
+    _pad_perspective: f32,
 
     // Bezier outline: open state (128 bytes)
     // 4 segments × 2 vec4f. Each vec4f packs 2 vec2f control points.
@@ -150,8 +156,9 @@ fn eval_outline(p: vec2f, close_t: f32) -> f32 {
 // Returns (color, alpha).
 // ============================================================
 
-fn render_eye(p: vec2f, mirror: f32) -> vec4f {
-    let local_p = vec2f(p.x * mirror, p.y);
+fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
+    let foreshortened = vec2f(p.x / h_scale, p.y / v_scale);
+    let local_p = vec2f(foreshortened.x * mirror, foreshortened.y);
 
     // --- Squash & Stretch (volume-preserving scale) ---
     let ss_scale = 1.0 + u.squash_stretch;
@@ -170,7 +177,8 @@ fn render_eye(p: vec2f, mirror: f32) -> vec4f {
     var eye_color = u.sclera_color;
 
     // --- Highlight (additive, over everything) ---
-    let hl_p = sq_p - u.highlight_offset;
+    let look_shift = vec2f(u.look_x * 0.03, u.look_y * 0.03);
+    let hl_p = sq_p - u.highlight_offset - look_shift;
     let d_hl = sd_circle(hl_p, u.highlight_radius);
     let aa_h = fwidth(d_hl) * 0.5;
     let hl_mask = 1.0 - smoothstep(-aa_h, aa_h, d_hl);
@@ -192,17 +200,52 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 
     var color = u.bg_color;
 
-    // Left eye
-    let left_center = vec2f(-u.eye_separation * 0.5, 0.0);
-    let left_p = p - left_center;
-    let left = render_eye(left_p, 1.0);
-    color = mix(color, left.xyz, left.w);
+    // --- Sphere projection model ---
+    // Eyes are decals on a virtual sphere. Rotation causes foreshortening.
+    let yaw   = u.look_x * u.max_angle;
+    let pitch = u.look_y * u.max_angle * u.aspect_ratio * 1.3;
 
-    // Right eye (mirrored X)
-    let right_center = vec2f(u.eye_separation * 0.5, 0.0);
-    let right_p = p - right_center;
-    let right = render_eye(right_p, -1.0);
-    color = mix(color, right.xyz, right.w);
+    // Angular half-separation of eyes on the sphere
+    let half_sep = clamp(u.eye_angle, 0.01, 1.5);
+
+    // Sphere radius: at yaw=0, eye_separation/2 = R * sin(half_sep)
+    let R = u.eye_separation * 0.5 / sin(half_sep);
+
+    // Per-eye horizontal angle from viewer center
+    let left_h  = -half_sep + yaw;
+    let right_h =  half_sep + yaw;
+
+    // Screen positions (sphere projection, vertical dampened for "rotate in place" feel)
+    let left_x  = R * sin(left_h);
+    let right_x = R * sin(right_h);
+    let y_off   = R * sin(pitch) * 0.3;
+
+    // Foreshortening: cos(angle) compresses the eye shape
+    let left_h_scale  = max(cos(left_h),  0.01);
+    let right_h_scale = max(cos(right_h), 0.01);
+    let v_scale       = max(cos(pitch),   0.01);
+
+    let left_center  = vec2f(left_x,  y_off);
+    let right_center = vec2f(right_x, y_off);
+
+    // --- Render order: farther eye first, closer eye on top ---
+    if left_h_scale <= right_h_scale {
+        let left_p = p - left_center;
+        let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
+        color = mix(color, left.xyz, left.w);
+
+        let right_p = p - right_center;
+        let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
+        color = mix(color, right.xyz, right.w);
+    } else {
+        let right_p = p - right_center;
+        let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
+        color = mix(color, right.xyz, right.w);
+
+        let left_p = p - left_center;
+        let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
+        color = mix(color, left.xyz, left.w);
+    }
 
     return vec4f(color, 1.0);
 }
