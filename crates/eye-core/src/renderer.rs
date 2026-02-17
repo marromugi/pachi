@@ -64,7 +64,7 @@ impl Default for EyeUniforms {
             highlight_intensity: 0.9,
 
             // Global
-            bg_color: [0.06, 0.06, 0.06],
+            bg_color: [0.045, 0.097, 0.199],
             eye_separation: 1.20,
             aspect_ratio: 16.0 / 9.0,
             time: 0.0,
@@ -78,7 +78,7 @@ impl Default for EyeUniforms {
             _pad_perspective: 0.0,
 
             // Iris
-            iris_color: [0.01, 0.01, 0.01],
+            iris_color: [0.009, 0.009, 0.035],
             iris_radius: 0.2,
             iris_follow: 0.14,
             _pad_iris: [0.0, 0.0, 0.0],

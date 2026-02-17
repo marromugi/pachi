@@ -3,7 +3,7 @@ use egui;
 use crate::outline::EyeShape;
 use crate::EyeUniforms;
 
-pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, auto_blink: &mut bool, follow_mouse: &mut bool) {
+pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, auto_blink: &mut bool, follow_mouse: &mut bool, show_highlight: &mut bool) {
     egui::SidePanel::right("eye_controls")
         .default_width(280.0)
         .show(ctx, |ui| {
@@ -75,6 +75,7 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
             egui::CollapsingHeader::new("Appearance")
                 .default_open(false)
                 .show(ui, |ui| {
+                    ui.checkbox(show_highlight, "Highlight");
                     ui.add(
                         egui::Slider::new(&mut uniforms.eye_separation, 0.2..=1.2)
                             .text("Eye Separation"),
