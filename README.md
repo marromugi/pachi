@@ -1,6 +1,8 @@
-# eye
+# pachi
 
 A real-time 3D eye renderer built with Rust and wgpu.
+
+https://github.com/user-attachments/assets/0e9f7275-b810-4117-87a6-af7fec657de5
 
 ## Features
 
