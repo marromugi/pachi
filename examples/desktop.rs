@@ -189,8 +189,22 @@ impl ApplicationHandler for App {
                 state.uniforms.time = state.start_time.elapsed().as_secs_f32();
 
                 if state.auto_blink {
-                    state.uniforms.eyelid_close =
+                    let eyelid_now =
                         state.blink_animation.evaluate(state.uniforms.time);
+
+                    // Squash & stretch driven by eyelid velocity
+                    let dt = 1.0 / 60.0_f32;
+                    let eyelid_prev =
+                        state.blink_animation.evaluate(state.uniforms.time - dt);
+                    let velocity = (eyelid_now - eyelid_prev) / dt;
+                    const SQUASH_STRENGTH: f32 = 0.08;
+                    const MAX_SQUASH: f32 = 0.045;
+                    state.uniforms.squash_stretch =
+                        (velocity * SQUASH_STRENGTH).clamp(-MAX_SQUASH, MAX_SQUASH);
+
+                    state.uniforms.eyelid_close = eyelid_now;
+                } else {
+                    state.uniforms.squash_stretch = 0.0;
                 }
 
                 // Sync eye shape into uniforms

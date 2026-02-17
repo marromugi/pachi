@@ -7,7 +7,7 @@
 struct Uniforms {
     // Sclera (16 bytes)
     sclera_color: vec3f,
-    _pad0: f32,
+    squash_stretch: f32,
 
     // Iris (48 bytes)
     iris_offset: vec2f,
@@ -213,8 +213,12 @@ fn iris_pattern(p: vec2f, radius: f32, noise_scale: f32) -> f32 {
 fn render_eye(p: vec2f, mirror: f32) -> vec4f {
     let local_p = vec2f(p.x * mirror, p.y);
 
+    // --- Squash & Stretch (volume-preserving scale) ---
+    let ss_scale = 1.0 + u.squash_stretch;
+    let sq_p = vec2f(local_p.x / ss_scale, local_p.y * ss_scale);
+
     // --- Outline (replaces sclera ellipse + eyelid clipping) ---
-    let d_outline = eval_outline(local_p, u.eyelid_close);
+    let d_outline = eval_outline(sq_p, u.eyelid_close);
     let aa = fwidth(d_outline) * 0.5;
     let outline_mask = 1.0 - smoothstep(-aa, aa, d_outline);
 
@@ -223,7 +227,7 @@ fn render_eye(p: vec2f, mirror: f32) -> vec4f {
     }
 
     // --- Iris ---
-    let iris_p = local_p - u.iris_offset;
+    let iris_p = sq_p - u.iris_offset;
     let d_iris = sd_circle(iris_p, u.iris_radius);
     let aa_i = fwidth(d_iris) * 0.5;
     let iris_mask = 1.0 - smoothstep(-aa_i, aa_i, d_iris);

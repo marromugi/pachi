@@ -13,7 +13,7 @@ use crate::outline::BezierOutline;
 pub struct EyeUniforms {
     // -- Sclera (white part) -- (16 bytes, offset 0)
     pub sclera_color: [f32; 3],      // offset 0   | vec3f
-    pub _pad0: f32,                  // offset 12
+    pub squash_stretch: f32,         // offset 12  | >0 = squash, <0 = stretch
 
     // -- Iris -- (48 bytes, offset 16)
     pub iris_offset: [f32; 2],       // offset 16  | vec2f (gaze drives this)
@@ -57,7 +57,7 @@ impl Default for EyeUniforms {
         Self {
             // Sclera
             sclera_color: [0.95, 0.95, 0.95],
-            _pad0: 0.0,
+            squash_stretch: 0.0,
 
             // Iris
             iris_offset: [0.0, 0.0],
