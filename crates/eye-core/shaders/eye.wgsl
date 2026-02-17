@@ -28,6 +28,14 @@ struct Uniforms {
     eye_angle: f32,
     _pad_perspective: f32,
 
+    // Iris (32 bytes)
+    iris_color: vec3f,
+    iris_radius: f32,
+    iris_follow: f32,
+    _pad_iris_a: f32,
+    _pad_iris_b: f32,
+    _pad_iris_c: f32,
+
     // Bezier outline: open state (128 bytes)
     // 4 segments × 2 vec4f. Each vec4f packs 2 vec2f control points.
     outline_open: array<vec4f, 8>,
@@ -176,8 +184,16 @@ fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
     // --- Compose eye content ---
     var eye_color = u.sclera_color;
 
+    // --- Iris (follows gaze) ---
+    let iris_offset = vec2f(mirror * u.look_x * u.iris_follow, u.look_y * u.iris_follow);
+    let iris_p = sq_p - iris_offset;
+    let d_iris = sd_circle(iris_p, u.iris_radius);
+    let aa_i = fwidth(d_iris) * 0.5;
+    let iris_mask = 1.0 - smoothstep(-aa_i, aa_i, d_iris);
+    eye_color = mix(eye_color, u.iris_color, iris_mask);
+
     // --- Highlight (additive, over everything) ---
-    let look_shift = vec2f(u.look_x * 0.03, u.look_y * 0.03);
+    let look_shift = vec2f(u.look_x * 0.05, u.look_y * 0.05);
     let hl_p = sq_p - u.highlight_offset - look_shift;
     let d_hl = sd_circle(hl_p, u.highlight_radius);
     let aa_h = fwidth(d_hl) * 0.5;
@@ -203,7 +219,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     // --- Sphere projection model ---
     // Eyes are decals on a virtual sphere. Rotation causes foreshortening.
     let yaw   = u.look_x * u.max_angle;
-    let pitch = u.look_y * u.max_angle * u.aspect_ratio * 1.3;
+    let pitch = u.look_y * u.max_angle * u.aspect_ratio * 0.65;
 
     // Angular half-separation of eyes on the sphere
     let half_sep = clamp(u.eye_angle, 0.01, 1.5);

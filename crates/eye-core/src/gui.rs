@@ -42,12 +42,31 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
 
             ui.separator();
 
+            egui::CollapsingHeader::new("Iris")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Iris Color");
+                        color_edit_rgb(ui, &mut uniforms.iris_color);
+                    });
+                    ui.add(
+                        egui::Slider::new(&mut uniforms.iris_radius, 0.02..=0.25)
+                            .text("Iris Radius"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut uniforms.iris_follow, 0.0..=0.20)
+                            .text("Iris Follow"),
+                    );
+                });
+
+            ui.separator();
+
             egui::CollapsingHeader::new("Eye Shape")
                 .default_open(true)
                 .show(ui, |ui| {
                     eye_shape_editor(ui, eye_shape);
                     if ui.button("Reset Ellipse").clicked() {
-                        eye_shape.open = crate::outline::BezierOutline::ellipse(0.20, 0.35);
+                        eye_shape.open = crate::outline::BezierOutline::ellipse(0.28, 0.35);
                     }
                 });
 

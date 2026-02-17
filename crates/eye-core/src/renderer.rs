@@ -34,16 +34,22 @@ pub struct EyeUniforms {
     pub eye_angle: f32,              // offset 72  | eye angular half-separation (radians)
     pub _pad_perspective: f32,       // offset 76
 
-    // -- Bezier outline open -- (128 bytes, offset 80)
+    // -- Iris -- (32 bytes, offset 80)
+    pub iris_color: [f32; 3],        // offset 80  | vec3f - iris color
+    pub iris_radius: f32,            // offset 92  | iris circle radius
+    pub iris_follow: f32,            // offset 96  | gaze follow scale
+    pub _pad_iris: [f32; 3],         // offset 100 | padding to 16-byte boundary
+
+    // -- Bezier outline open -- (128 bytes, offset 112)
     // 4 segments x 2 vec4f each. Each vec4f packs 2 vec2f control points.
     // seg[i*2]   = (P0.xy, P1.xy) = (anchor, anchor+handle_out)
     // seg[i*2+1] = (P2.xy, P3.xy) = (next_anchor+handle_in, next_anchor)
     pub outline_open: [[f32; 4]; 8],
 
-    // -- Bezier outline closed -- (128 bytes, offset 208)
+    // -- Bezier outline closed -- (128 bytes, offset 240)
     pub outline_closed: [[f32; 4]; 8],
 }
-// Total: 336 bytes (= 16 * 21)
+// Total: 368 bytes (= 16 * 23)
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -58,7 +64,7 @@ impl Default for EyeUniforms {
             highlight_intensity: 0.9,
 
             // Global
-            bg_color: [0.0, 0.0, 0.0],
+            bg_color: [0.06, 0.06, 0.06],
             eye_separation: 1.20,
             aspect_ratio: 16.0 / 9.0,
             time: 0.0,
@@ -71,8 +77,14 @@ impl Default for EyeUniforms {
             eye_angle: 0.8,
             _pad_perspective: 0.0,
 
+            // Iris
+            iris_color: [0.01, 0.01, 0.01],
+            iris_radius: 0.2,
+            iris_follow: 0.14,
+            _pad_iris: [0.0, 0.0, 0.0],
+
             // Bezier outline
-            outline_open: BezierOutline::ellipse(0.20, 0.35).to_uniform_array(),
+            outline_open: BezierOutline::ellipse(0.28, 0.35).to_uniform_array(),
             outline_closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20).to_uniform_array(),
         }
     }

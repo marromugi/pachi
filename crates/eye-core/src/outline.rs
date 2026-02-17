@@ -263,7 +263,7 @@ pub struct EyeShape {
 impl Default for EyeShape {
     fn default() -> Self {
         Self {
-            open: BezierOutline::ellipse(0.20, 0.35),
+            open: BezierOutline::ellipse(0.28, 0.35),
             closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20),
         }
     }
