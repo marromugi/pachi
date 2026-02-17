@@ -79,11 +79,11 @@ impl Default for EyeUniforms {
 
             // Global
             bg_color: [0.0, 0.0, 0.0],
-            eye_separation: 0.55,
+            eye_separation: 1.20,
             aspect_ratio: 16.0 / 9.0,
             time: 0.0,
             eyelid_close: 0.2,
-            show_iris_pupil: 1.0,
+            show_iris_pupil: 0.0,
 
             // Bezier outline
             outline_open: BezierOutline::circle(0.30).to_uniform_array(),
