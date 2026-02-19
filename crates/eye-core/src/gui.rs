@@ -63,6 +63,16 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
                         egui::Slider::new(&mut uniforms.iris_follow, 0.0..=0.20)
                             .text("Iris Follow"),
                     );
+                    ui.separator();
+                    ui.label("Pupil");
+                    ui.horizontal(|ui| {
+                        ui.label("Pupil Color");
+                        color_edit_rgb(ui, &mut uniforms.pupil_color);
+                    });
+                    ui.add(
+                        egui::Slider::new(&mut uniforms.pupil_radius, 0.01..=0.20)
+                            .text("Pupil Radius"),
+                    );
                 });
 
             ui.separator();

@@ -60,10 +60,14 @@ pub struct EyeUniforms {
     // Rendered as a stroke on the upper eye outline (no separate shape).
     pub eyelash_color: [f32; 3],         // offset 528 | vec3f
     pub eyelash_thickness: f32,          // offset 540 | stroke thickness
-}
-// Total: 544 bytes (= 16 * 34)
 
-const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 544);
+    // -- Pupil -- (16 bytes, offset 544)
+    pub pupil_color: [f32; 3],           // offset 544 | vec3f
+    pub pupil_radius: f32,              // offset 556 | pupil circle radius
+}
+// Total: 560 bytes (= 16 * 35)
+
+const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 560);
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -92,7 +96,7 @@ impl Default for EyeUniforms {
             convergence: 0.0,
 
             // Iris
-            iris_color: [0.009, 0.009, 0.035],
+            iris_color: [0.112, 0.126, 0.214],
             iris_radius: 0.2,
             iris_follow: 0.14,
             _pad_iris: [0.0, 0.0, 0.0],
@@ -111,6 +115,10 @@ impl Default for EyeUniforms {
             // Eyelash
             eyelash_color: [0.009, 0.009, 0.035],
             eyelash_thickness: 0.020,
+
+            // Pupil
+            pupil_color: [0.013, 0.013, 0.030],
+            pupil_radius: 0.08,
         }
     }
 }

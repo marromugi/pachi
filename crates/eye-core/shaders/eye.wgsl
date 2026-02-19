@@ -55,6 +55,10 @@ struct Uniforms {
     // Eyelash (16 bytes) — stroke on upper eye outline
     eyelash_color: vec3f,
     eyelash_thickness: f32,
+
+    // Pupil (16 bytes) — dark circle at center of iris
+    pupil_color: vec3f,
+    pupil_radius: f32,
 }
 
 @group(0) @binding(0)
@@ -342,6 +346,12 @@ fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
     let aa_i = fwidth(d_iris) * 0.5;
     let iris_mask = 1.0 - smoothstep(-aa_i, aa_i, d_iris);
     eye_color = mix(eye_color, u.iris_color, iris_mask);
+
+    // --- Pupil (center of iris) ---
+    let d_pupil = sd_circle(iris_p, u.pupil_radius);
+    let aa_p = fwidth(d_pupil) * 0.5;
+    let pupil_mask = 1.0 - smoothstep(-aa_p, aa_p, d_pupil);
+    eye_color = mix(eye_color, u.pupil_color, pupil_mask);
 
     // --- Highlight (additive, over everything) ---
     let look_shift = vec2f(u.look_x * 0.05, u.look_y * 0.05);
