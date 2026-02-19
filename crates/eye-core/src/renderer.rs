@@ -55,10 +55,15 @@ pub struct EyeUniforms {
     pub eyebrow_follow: f32,             // offset 384 | eyelid follow rate
     pub _pad_eyebrow: [f32; 3],          // offset 388 | padding to 16-byte boundary
     pub eyebrow_outline: [[f32; 4]; 8],  // offset 400 | Bezier control points
-}
-// Total: 528 bytes (= 16 * 33)
 
-const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 528);
+    // -- Eyelash -- (16 bytes, offset 528)
+    // Rendered as a stroke on the upper eye outline (no separate shape).
+    pub eyelash_color: [f32; 3],         // offset 528 | vec3f
+    pub eyelash_thickness: f32,          // offset 540 | stroke thickness
+}
+// Total: 544 bytes (= 16 * 34)
+
+const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 544);
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -102,6 +107,10 @@ impl Default for EyeUniforms {
             eyebrow_follow: 0.15,
             _pad_eyebrow: [0.0, 0.0, 0.0],
             eyebrow_outline: BezierOutline::eyebrow_arc(0.30, 0.04).to_uniform_array(),
+
+            // Eyelash
+            eyelash_color: [0.009, 0.009, 0.035],
+            eyelash_thickness: 0.020,
         }
     }
 }

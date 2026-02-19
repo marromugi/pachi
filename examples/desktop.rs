@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use eye::gui::eye_control_panel;
-use eye::{BlinkAnimation, EyeRenderer, EyeShape, EyebrowShape, EyeUniforms};
+use eye::{BlinkAnimation, EyelashShape, EyeRenderer, EyeShape, EyebrowShape, EyeUniforms};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -23,11 +23,13 @@ struct AppState {
     uniforms: EyeUniforms,
     eye_shape: EyeShape,
     eyebrow_shape: EyebrowShape,
+    eyelash_shape: EyelashShape,
     blink_animation: BlinkAnimation,
     auto_blink: bool,
     follow_mouse: bool,
     show_highlight: bool,
     show_eyebrow: bool,
+    show_eyelash: bool,
     focus_distance: f32,
     mouse_position: Option<winit::dpi::PhysicalPosition<f64>>,
     start_time: Instant,
@@ -124,11 +126,13 @@ impl ApplicationHandler for App {
                 uniforms,
                 eye_shape,
                 eyebrow_shape: EyebrowShape::default(),
+                eyelash_shape: EyelashShape::default(),
                 blink_animation: BlinkAnimation::sample(),
                 auto_blink: true,
                 follow_mouse: true,
                 show_highlight: true,
                 show_eyebrow: true,
+                show_eyelash: true,
                 focus_distance: 20.0,
                 mouse_position: None,
                 start_time: Instant::now(),
@@ -249,10 +253,14 @@ impl ApplicationHandler for App {
                 state.uniforms.eyebrow_follow = state.eyebrow_shape.follow;
                 state.uniforms.eyebrow_outline = state.eyebrow_shape.outline.to_uniform_array();
 
+                // Sync eyelash shape into uniforms
+                state.uniforms.eyelash_color = state.eyelash_shape.color;
+                state.uniforms.eyelash_thickness = state.eyelash_shape.thickness;
+
                 // --- egui frame ---
                 let raw_input = state.egui_state.take_egui_input(&state.window);
                 let full_output = state.egui_ctx.run(raw_input, |ctx| {
-                    eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape, &mut state.eyebrow_shape, &mut state.auto_blink, &mut state.follow_mouse, &mut state.show_highlight, &mut state.show_eyebrow, &mut state.focus_distance);
+                    eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape, &mut state.eyebrow_shape, &mut state.eyelash_shape, &mut state.auto_blink, &mut state.follow_mouse, &mut state.show_highlight, &mut state.show_eyebrow, &mut state.show_eyelash, &mut state.focus_distance);
                 });
 
                 state
@@ -320,6 +328,10 @@ impl ApplicationHandler for App {
                     if !state.show_eyebrow {
                         state.uniforms.eyebrow_base_y = 100.0;
                     }
+                    let saved_eyelash_thickness = state.uniforms.eyelash_thickness;
+                    if !state.show_eyelash {
+                        state.uniforms.eyelash_thickness = 0.0;
+                    }
                     state.queue.write_buffer(
                         state.renderer.uniform_buffer(),
                         0,
@@ -327,6 +339,7 @@ impl ApplicationHandler for App {
                     );
                     state.uniforms.highlight_intensity = saved_highlight;
                     state.uniforms.eyebrow_base_y = saved_eyebrow_base_y;
+                    state.uniforms.eyelash_thickness = saved_eyelash_thickness;
                     pass.set_pipeline(state.renderer.pipeline());
                     pass.set_bind_group(0, state.renderer.bind_group(), &[]);
                     pass.draw(0..3, 0..1);

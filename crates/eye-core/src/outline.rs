@@ -357,3 +357,23 @@ impl Default for EyebrowShape {
         }
     }
 }
+
+/// Eyelash shape and behavior parameters.
+/// Rendered as a stroke along the upper edge of the eye outline,
+/// automatically following the contour during blinks.
+#[derive(Clone, Debug)]
+pub struct EyelashShape {
+    /// Eyelash fill color [R, G, B] in linear sRGB, 0..1.
+    pub color: [f32; 3],
+    /// Stroke thickness in eye-space units.
+    pub thickness: f32,
+}
+
+impl Default for EyelashShape {
+    fn default() -> Self {
+        Self {
+            color: [0.0090, 0.0090, 0.0350],
+            thickness: 0.020,
+        }
+    }
+}

@@ -1,9 +1,9 @@
 use egui;
 
-use crate::outline::{BezierOutline, EyeShape, EyebrowShape};
+use crate::outline::{BezierOutline, EyelashShape, EyeShape, EyebrowShape};
 use crate::EyeUniforms;
 
-pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, eyebrow_shape: &mut EyebrowShape, auto_blink: &mut bool, follow_mouse: &mut bool, show_highlight: &mut bool, show_eyebrow: &mut bool, focus_distance: &mut f32) {
+pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, eyebrow_shape: &mut EyebrowShape, eyelash_shape: &mut EyelashShape, auto_blink: &mut bool, follow_mouse: &mut bool, show_highlight: &mut bool, show_eyebrow: &mut bool, show_eyelash: &mut bool, focus_distance: &mut f32) {
     egui::SidePanel::right("eye_controls")
         .default_width(280.0)
         .show(ctx, |ui| {
@@ -108,6 +108,25 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
 
             ui.separator();
 
+            egui::CollapsingHeader::new("Eyelash")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.checkbox(show_eyelash, "Show Eyelash");
+                    ui.horizontal(|ui| {
+                        ui.label("Color");
+                        color_edit_rgb(ui, &mut eyelash_shape.color);
+                    });
+                    ui.add(
+                        egui::Slider::new(&mut eyelash_shape.thickness, 0.005..=0.06)
+                            .text("Thickness"),
+                    );
+                    if ui.button("Reset Eyelash").clicked() {
+                        *eyelash_shape = EyelashShape::default();
+                    }
+                });
+
+            ui.separator();
+
             egui::CollapsingHeader::new("Appearance")
                 .default_open(false)
                 .show(ui, |ui| {
@@ -136,6 +155,7 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
                 uniforms.time = time;
                 *eye_shape = EyeShape::default();
                 *eyebrow_shape = EyebrowShape::default();
+                *eyelash_shape = EyelashShape::default();
             }
             });
         });
