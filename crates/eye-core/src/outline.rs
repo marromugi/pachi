@@ -323,10 +323,37 @@ pub struct EyebrowShape {
 impl Default for EyebrowShape {
     fn default() -> Self {
         Self {
-            outline: BezierOutline::eyebrow_arc(0.30, 0.04),
             base_y: 0.48,
             follow: 0.15,
-            color: [0.15, 0.10, 0.08],
+            color: [0.0090, 0.0090, 0.0350],
+            outline: BezierOutline {
+                anchors: [
+                    // Left
+                    BezierAnchor {
+                        position: [-0.276688, 0.004054],
+                        handle_in: [0.001793, -0.000075],
+                        handle_out: [-0.042644, 0.001777],
+                    },
+                    // Top
+                    BezierAnchor {
+                        position: [-0.021708, 0.136242],
+                        handle_in: [-0.171063, -0.004677],
+                        handle_out: [0.192878, 0.005273],
+                    },
+                    // Right
+                    BezierAnchor {
+                        position: [0.268674, 0.000915],
+                        handle_in: [-0.002503, 0.024416],
+                        handle_out: [0.000676, -0.006593],
+                    },
+                    // Bottom
+                    BezierAnchor {
+                        position: [-0.018700, 0.093182],
+                        handle_in: [0.183354, 0.003248],
+                        handle_out: [-0.163634, -0.002899],
+                    },
+                ],
+            },
         }
     }
 }

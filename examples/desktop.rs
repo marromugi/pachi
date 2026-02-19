@@ -27,6 +27,7 @@ struct AppState {
     auto_blink: bool,
     follow_mouse: bool,
     show_highlight: bool,
+    show_eyebrow: bool,
     mouse_position: Option<winit::dpi::PhysicalPosition<f64>>,
     start_time: Instant,
 
@@ -126,6 +127,7 @@ impl ApplicationHandler for App {
                 auto_blink: true,
                 follow_mouse: true,
                 show_highlight: true,
+                show_eyebrow: true,
                 mouse_position: None,
                 start_time: Instant::now(),
                 egui_ctx,
@@ -243,7 +245,7 @@ impl ApplicationHandler for App {
                 // --- egui frame ---
                 let raw_input = state.egui_state.take_egui_input(&state.window);
                 let full_output = state.egui_ctx.run(raw_input, |ctx| {
-                    eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape, &mut state.eyebrow_shape, &mut state.auto_blink, &mut state.follow_mouse, &mut state.show_highlight);
+                    eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape, &mut state.eyebrow_shape, &mut state.auto_blink, &mut state.follow_mouse, &mut state.show_highlight, &mut state.show_eyebrow);
                 });
 
                 state
@@ -304,8 +306,12 @@ impl ApplicationHandler for App {
 
                     // Draw eye
                     let saved_highlight = state.uniforms.highlight_intensity;
+                    let saved_eyebrow_base_y = state.uniforms.eyebrow_base_y;
                     if !state.show_highlight {
                         state.uniforms.highlight_intensity = 0.0;
+                    }
+                    if !state.show_eyebrow {
+                        state.uniforms.eyebrow_base_y = 100.0;
                     }
                     state.queue.write_buffer(
                         state.renderer.uniform_buffer(),
@@ -313,6 +319,7 @@ impl ApplicationHandler for App {
                         bytemuck::bytes_of(&state.uniforms),
                     );
                     state.uniforms.highlight_intensity = saved_highlight;
+                    state.uniforms.eyebrow_base_y = saved_eyebrow_base_y;
                     pass.set_pipeline(state.renderer.pipeline());
                     pass.set_bind_group(0, state.renderer.bind_group(), &[]);
                     pass.draw(0..3, 0..1);
