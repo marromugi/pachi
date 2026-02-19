@@ -1,9 +1,9 @@
 use egui;
 
-use crate::outline::EyeShape;
+use crate::outline::{BezierOutline, EyeShape, EyebrowShape};
 use crate::EyeUniforms;
 
-pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, auto_blink: &mut bool, follow_mouse: &mut bool, show_highlight: &mut bool) {
+pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, eyebrow_shape: &mut EyebrowShape, auto_blink: &mut bool, follow_mouse: &mut bool, show_highlight: &mut bool) {
     egui::SidePanel::right("eye_controls")
         .default_width(280.0)
         .show(ctx, |ui| {
@@ -64,9 +64,32 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
             egui::CollapsingHeader::new("Eye Shape")
                 .default_open(true)
                 .show(ui, |ui| {
-                    eye_shape_editor(ui, eye_shape);
+                    bezier_outline_editor(ui, &mut eye_shape.open, "eye_shape");
                     if ui.button("Reset Ellipse").clicked() {
-                        eye_shape.open = crate::outline::BezierOutline::ellipse(0.28, 0.35);
+                        eye_shape.open = BezierOutline::ellipse(0.28, 0.35);
+                    }
+                });
+
+            ui.separator();
+
+            egui::CollapsingHeader::new("Eyebrow")
+                .default_open(true)
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label("Color");
+                        color_edit_rgb(ui, &mut eyebrow_shape.color);
+                    });
+                    ui.add(
+                        egui::Slider::new(&mut eyebrow_shape.base_y, 0.30..=0.70)
+                            .text("Base Y"),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut eyebrow_shape.follow, 0.0..=0.40)
+                            .text("Follow Rate"),
+                    );
+                    bezier_outline_editor(ui, &mut eyebrow_shape.outline, "eyebrow_shape");
+                    if ui.button("Reset Eyebrow").clicked() {
+                        *eyebrow_shape = EyebrowShape::default();
                     }
                 });
 
@@ -99,18 +122,19 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
                 uniforms.aspect_ratio = aspect;
                 uniforms.time = time;
                 *eye_shape = EyeShape::default();
+                *eyebrow_shape = EyebrowShape::default();
             }
         });
 }
 
 // ============================================================
-// Interactive 2D Bezier curve editor
+// Interactive 2D Bezier curve editor (generic)
 // ============================================================
 
 // Drag target encoding: 0-3 = anchor[i], 4-7 = handle_in[i-4], 8-11 = handle_out[i-8]
 const DRAG_NONE: i32 = -1;
 
-fn eye_shape_editor(ui: &mut egui::Ui, eye_shape: &mut EyeShape) {
+fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_id: &str) {
     let available_width = ui.available_width();
     let size = available_width.min(300.0);
     let (response, painter) = ui.allocate_painter(
@@ -134,7 +158,7 @@ fn eye_shape_editor(ui: &mut egui::Ui, eye_shape: &mut EyeShape) {
     };
 
     // --- Drag state ---
-    let drag_id = response.id.with("drag");
+    let drag_id = response.id.with(editor_id).with("drag");
     let mut drag_idx: i32 = ui.memory(|m| m.data.get_temp(drag_id)).unwrap_or(DRAG_NONE);
 
     // Find hovered point (for visual feedback)
@@ -144,7 +168,7 @@ fn eye_shape_editor(ui: &mut egui::Ui, eye_shape: &mut EyeShape) {
         if let Some(pos) = response.hover_pos() {
             let mut best_dist = hover_threshold;
             for i in 0..4 {
-                let a = &eye_shape.open.anchors[i];
+                let a = &outline.anchors[i];
                 let d = pos.distance(to_screen(a.position));
                 if d < best_dist {
                     best_dist = d;
@@ -182,7 +206,7 @@ fn eye_shape_editor(ui: &mut egui::Ui, eye_shape: &mut EyeShape) {
 
     // --- Draw Bezier curve segments ---
     let curve_color = egui::Color32::from_rgb(220, 220, 220);
-    let anchors = &eye_shape.open.anchors;
+    let anchors = &outline.anchors;
     for seg in 0..4 {
         let next = (seg + 1) % 4;
         let a = &anchors[seg];
@@ -285,20 +309,20 @@ fn eye_shape_editor(ui: &mut egui::Ui, eye_shape: &mut EyeShape) {
             if drag_idx < 4 {
                 // Dragging an anchor point — only re-adjust this anchor's handles
                 let i = drag_idx as usize;
-                eye_shape.open.anchors[i].position = p;
-                eye_shape.open.auto_adjust_handle_at(i);
+                outline.anchors[i].position = p;
+                outline.auto_adjust_handle_at(i);
             } else if drag_idx < 8 {
                 // Dragging handle_in
                 let i = (drag_idx - 4) as usize;
-                let anchor = eye_shape.open.anchors[i].position;
-                eye_shape.open.anchors[i].handle_in = [p[0] - anchor[0], p[1] - anchor[1]];
-                eye_shape.open.anchors[i].enforce_collinear_from_in();
+                let anchor = outline.anchors[i].position;
+                outline.anchors[i].handle_in = [p[0] - anchor[0], p[1] - anchor[1]];
+                outline.anchors[i].enforce_collinear_from_in();
             } else {
                 // Dragging handle_out
                 let i = (drag_idx - 8) as usize;
-                let anchor = eye_shape.open.anchors[i].position;
-                eye_shape.open.anchors[i].handle_out = [p[0] - anchor[0], p[1] - anchor[1]];
-                eye_shape.open.anchors[i].enforce_collinear_from_out();
+                let anchor = outline.anchors[i].position;
+                outline.anchors[i].handle_out = [p[0] - anchor[0], p[1] - anchor[1]];
+                outline.anchors[i].enforce_collinear_from_out();
             }
         }
     }

@@ -6,5 +6,5 @@ pub mod renderer;
 pub mod gui;
 
 pub use animation::BlinkAnimation;
-pub use outline::{BezierAnchor, BezierOutline, EyeShape};
+pub use outline::{BezierAnchor, BezierOutline, EyeShape, EyebrowShape};
 pub use renderer::{EyeRenderer, EyeUniforms};

@@ -48,8 +48,17 @@ pub struct EyeUniforms {
 
     // -- Bezier outline closed -- (128 bytes, offset 240)
     pub outline_closed: [[f32; 4]; 8],
+
+    // -- Eyebrow -- (160 bytes, offset 368)
+    pub eyebrow_color: [f32; 3],         // offset 368 | vec3f
+    pub eyebrow_base_y: f32,             // offset 380 | base Y position above eye
+    pub eyebrow_follow: f32,             // offset 384 | eyelid follow rate
+    pub _pad_eyebrow: [f32; 3],          // offset 388 | padding to 16-byte boundary
+    pub eyebrow_outline: [[f32; 4]; 8],  // offset 400 | Bezier control points
 }
-// Total: 368 bytes (= 16 * 23)
+// Total: 528 bytes (= 16 * 33)
+
+const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 528);
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -86,6 +95,13 @@ impl Default for EyeUniforms {
             // Bezier outline
             outline_open: BezierOutline::ellipse(0.28, 0.35).to_uniform_array(),
             outline_closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20).to_uniform_array(),
+
+            // Eyebrow
+            eyebrow_color: [0.15, 0.10, 0.08],
+            eyebrow_base_y: 0.48,
+            eyebrow_follow: 0.15,
+            _pad_eyebrow: [0.0, 0.0, 0.0],
+            eyebrow_outline: BezierOutline::eyebrow_arc(0.30, 0.04).to_uniform_array(),
         }
     }
 }

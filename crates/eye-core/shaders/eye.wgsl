@@ -42,6 +42,15 @@ struct Uniforms {
 
     // Bezier outline: closed state (128 bytes)
     outline_closed: array<vec4f, 8>,
+
+    // Eyebrow (160 bytes)
+    eyebrow_color: vec3f,
+    eyebrow_base_y: f32,
+    eyebrow_follow: f32,
+    _pad_eyebrow_a: f32,
+    _pad_eyebrow_b: f32,
+    _pad_eyebrow_c: f32,
+    eyebrow_outline: array<vec4f, 8>,
 }
 
 @group(0) @binding(0)
@@ -159,6 +168,64 @@ fn eval_outline(p: vec2f, close_t: f32) -> f32 {
 }
 
 // ============================================================
+// Evaluate eyebrow outline: returns signed distance
+// The eyebrow is shifted vertically based on eyelid state.
+// ============================================================
+
+fn eval_eyebrow_outline(p: vec2f, close_t: f32) -> f32 {
+    let y_offset = u.eyebrow_base_y - close_t * u.eyebrow_follow;
+    let shifted_p = vec2f(p.x, p.y - y_offset);
+
+    var min_d2 = 1e10;
+    var winding = 0.0;
+
+    for (var seg = 0u; seg < 4u; seg++) {
+        let idx = seg * 2u;
+        let cp0 = u.eyebrow_outline[idx];
+        let cp1 = u.eyebrow_outline[idx + 1u];
+
+        let P0 = cp0.xy;
+        let P1 = cp0.zw;
+        let P2 = cp1.xy;
+        let P3 = cp1.zw;
+
+        var prev = P0;
+        for (var i = 1u; i <= SUBDIV; i++) {
+            let t = f32(i) / f32(SUBDIV);
+            let curr = cubic_bezier(t, P0, P1, P2, P3);
+            let result = point_segment_test(shifted_p, prev, curr);
+            min_d2 = min(min_d2, result.x);
+            winding += result.y;
+            prev = curr;
+        }
+    }
+
+    let dist = sqrt(min_d2);
+    let sign_val = select(1.0, -1.0, winding != 0.0);
+    return dist * sign_val;
+}
+
+// ============================================================
+// Render eyebrow at local coordinates.
+// Same foreshortening/mirroring as the eye, but no squash_stretch.
+// ============================================================
+
+fn render_eyebrow(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
+    let foreshortened = vec2f(p.x / h_scale, p.y / v_scale);
+    let local_p = vec2f(foreshortened.x * mirror, foreshortened.y);
+
+    let d_brow = eval_eyebrow_outline(local_p, u.eyelid_close);
+    let aa = fwidth(d_brow) * 0.5;
+    let brow_mask = 1.0 - smoothstep(-aa, aa, d_brow);
+
+    if brow_mask < 0.001 {
+        return vec4f(0.0, 0.0, 0.0, 0.0);
+    }
+
+    return vec4f(u.eyebrow_color, brow_mask);
+}
+
+// ============================================================
 // Render a single eye at local coordinates.
 // `mirror` is 1.0 for left eye, -1.0 for right eye.
 // Returns (color, alpha).
@@ -245,20 +312,29 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     let right_center = vec2f(right_x, y_off);
 
     // --- Render order: farther eye first, closer eye on top ---
+    // Per eye: eyebrow first (behind), then eye on top.
     if left_h_scale <= right_h_scale {
         let left_p = p - left_center;
+        let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale);
+        color = mix(color, left_brow.xyz, left_brow.w);
         let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
         color = mix(color, left.xyz, left.w);
 
         let right_p = p - right_center;
+        let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale);
+        color = mix(color, right_brow.xyz, right_brow.w);
         let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
         color = mix(color, right.xyz, right.w);
     } else {
         let right_p = p - right_center;
+        let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale);
+        color = mix(color, right_brow.xyz, right_brow.w);
         let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
         color = mix(color, right.xyz, right.w);
 
         let left_p = p - left_center;
+        let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale);
+        color = mix(color, left_brow.xyz, left_brow.w);
         let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
         color = mix(color, left.xyz, left.w);
     }

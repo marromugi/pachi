@@ -92,6 +92,42 @@ impl BezierOutline {
         }
     }
 
+    /// Create a thin eyebrow arc shape, centered at origin.
+    /// `half_width` is the horizontal half-extent.
+    /// `thickness` is the vertical half-extent (how thick the brow is).
+    pub fn eyebrow_arc(half_width: f32, thickness: f32) -> Self {
+        let hw = half_width * KAPPA;
+        let ht = thickness * KAPPA;
+        Self {
+            anchors: [
+                // Left tip (-half_width, 0): tapers to a point
+                BezierAnchor {
+                    position: [-half_width, 0.0],
+                    handle_in: [0.0, -ht * 0.3],
+                    handle_out: [0.0, ht * 0.3],
+                },
+                // Top center (0, +thickness): upper arc
+                BezierAnchor {
+                    position: [0.0, thickness],
+                    handle_in: [-hw, 0.0],
+                    handle_out: [hw, 0.0],
+                },
+                // Right tip (+half_width, 0): tapers to a point
+                BezierAnchor {
+                    position: [half_width, 0.0],
+                    handle_in: [0.0, ht * 0.3],
+                    handle_out: [0.0, -ht * 0.3],
+                },
+                // Bottom center (0, -thickness): lower arc
+                BezierAnchor {
+                    position: [0.0, -thickness],
+                    handle_in: [hw, 0.0],
+                    handle_out: [-hw, 0.0],
+                },
+            ],
+        }
+    }
+
     /// Create a closed-eye slit shape (nearly flat horizontal line).
     pub fn closed_slit(half_width: f32, y_pos: f32) -> Self {
         let tiny = 0.005;
@@ -265,6 +301,32 @@ impl Default for EyeShape {
         Self {
             open: BezierOutline::ellipse(0.28, 0.35),
             closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20),
+        }
+    }
+}
+
+/// Eyebrow shape and behavior parameters.
+/// Uses a single BezierOutline (no open/closed states).
+#[derive(Clone, Debug)]
+pub struct EyebrowShape {
+    /// The eyebrow outline (a thin arc shape using the same 4-anchor BezierOutline).
+    pub outline: BezierOutline,
+    /// Base Y offset above the eye center (in eye-space units).
+    pub base_y: f32,
+    /// How much the eyebrow follows eyelid closure.
+    /// Effective Y = base_y - eyelid_close * follow.
+    pub follow: f32,
+    /// Eyebrow fill color [R, G, B] in linear sRGB, 0..1.
+    pub color: [f32; 3],
+}
+
+impl Default for EyebrowShape {
+    fn default() -> Self {
+        Self {
+            outline: BezierOutline::eyebrow_arc(0.30, 0.04),
+            base_y: 0.48,
+            follow: 0.15,
+            color: [0.15, 0.10, 0.08],
         }
     }
 }
