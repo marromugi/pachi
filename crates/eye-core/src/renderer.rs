@@ -32,7 +32,7 @@ pub struct EyeUniforms {
     pub look_y: f32,                 // offset 64  | [-1, 1] vertical gaze
     pub max_angle: f32,              // offset 68  | max rotation angle (radians)
     pub eye_angle: f32,              // offset 72  | eye angular half-separation (radians)
-    pub _pad_perspective: f32,       // offset 76
+    pub convergence: f32,            // offset 76  | iris convergence offset
 
     // -- Iris -- (32 bytes, offset 80)
     pub iris_color: [f32; 3],        // offset 80  | vec3f - iris color
@@ -84,7 +84,7 @@ impl Default for EyeUniforms {
             look_y: 0.0,
             max_angle: 0.5,
             eye_angle: 0.8,
-            _pad_perspective: 0.0,
+            convergence: 0.0,
 
             // Iris
             iris_color: [0.009, 0.009, 0.035],

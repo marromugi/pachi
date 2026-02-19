@@ -26,7 +26,7 @@ struct Uniforms {
     look_y: f32,
     max_angle: f32,
     eye_angle: f32,
-    _pad_perspective: f32,
+    convergence: f32,
 
     // Iris (32 bytes)
     iris_color: vec3f,
@@ -252,7 +252,10 @@ fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
     var eye_color = u.sclera_color;
 
     // --- Iris (follows gaze) ---
-    let iris_offset = vec2f(mirror * u.look_x * u.iris_follow, u.look_y * u.iris_follow);
+    let iris_offset = vec2f(
+        mirror * u.look_x * u.iris_follow + u.convergence,
+        u.look_y * u.iris_follow
+    );
     let iris_p = sq_p - iris_offset;
     let d_iris = sd_circle(iris_p, u.iris_radius);
     let aa_i = fwidth(d_iris) * 0.5;

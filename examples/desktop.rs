@@ -28,6 +28,7 @@ struct AppState {
     follow_mouse: bool,
     show_highlight: bool,
     show_eyebrow: bool,
+    focus_distance: f32,
     mouse_position: Option<winit::dpi::PhysicalPosition<f64>>,
     start_time: Instant,
 
@@ -128,6 +129,7 @@ impl ApplicationHandler for App {
                 follow_mouse: true,
                 show_highlight: true,
                 show_eyebrow: true,
+                focus_distance: 20.0,
                 mouse_position: None,
                 start_time: Instant::now(),
                 egui_ctx,
@@ -232,6 +234,11 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                // Focus distance → convergence offset
+                let half_ipd = state.uniforms.eye_separation * 0.5;
+                state.uniforms.convergence = (half_ipd / state.focus_distance * 0.08)
+                    .clamp(0.0, state.uniforms.iris_follow * 0.8);
+
                 // Sync eye shape into uniforms
                 state.uniforms.outline_open = state.eye_shape.open.to_uniform_array();
                 state.uniforms.outline_closed = state.eye_shape.closed.to_uniform_array();
@@ -245,7 +252,7 @@ impl ApplicationHandler for App {
                 // --- egui frame ---
                 let raw_input = state.egui_state.take_egui_input(&state.window);
                 let full_output = state.egui_ctx.run(raw_input, |ctx| {
-                    eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape, &mut state.eyebrow_shape, &mut state.auto_blink, &mut state.follow_mouse, &mut state.show_highlight, &mut state.show_eyebrow);
+                    eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape, &mut state.eyebrow_shape, &mut state.auto_blink, &mut state.follow_mouse, &mut state.show_highlight, &mut state.show_eyebrow, &mut state.focus_distance);
                 });
 
                 state

@@ -3,7 +3,7 @@ use egui;
 use crate::outline::{BezierOutline, EyeShape, EyebrowShape};
 use crate::EyeUniforms;
 
-pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, eyebrow_shape: &mut EyebrowShape, auto_blink: &mut bool, follow_mouse: &mut bool, show_highlight: &mut bool, show_eyebrow: &mut bool) {
+pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, eyebrow_shape: &mut EyebrowShape, auto_blink: &mut bool, follow_mouse: &mut bool, show_highlight: &mut bool, show_eyebrow: &mut bool, focus_distance: &mut f32) {
     egui::SidePanel::right("eye_controls")
         .default_width(280.0)
         .show(ctx, |ui| {
@@ -38,6 +38,11 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
                     ui.add(
                         egui::Slider::new(&mut uniforms.eye_angle, 0.05..=1.2)
                             .text("Eye Angle"),
+                    );
+                    ui.add(
+                        egui::Slider::new(focus_distance, 0.5..=20.0)
+                            .text("Focus Distance")
+                            .logarithmic(true),
                     );
                 });
 
