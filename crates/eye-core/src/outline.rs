@@ -336,9 +336,9 @@ impl Default for EyebrowShape {
                     },
                     // Top
                     BezierAnchor {
-                        position: [-0.021708, 0.136242],
-                        handle_in: [-0.171063, -0.004677],
-                        handle_out: [0.192878, 0.005273],
+                        position: [-0.020307, 0.082777],
+                        handle_in: [-0.148111, -0.001620],
+                        handle_out: [0.165870, 0.001814],
                     },
                     // Right
                     BezierAnchor {
@@ -348,9 +348,9 @@ impl Default for EyebrowShape {
                     },
                     // Bottom
                     BezierAnchor {
-                        position: [-0.018700, 0.093182],
-                        handle_in: [0.183354, 0.003248],
-                        handle_out: [-0.163634, -0.002899],
+                        position: [-0.016383, 0.052027],
+                        handle_in: [0.159943, 0.000386],
+                        handle_out: [-0.146183, -0.000353],
                     },
                 ],
             },
