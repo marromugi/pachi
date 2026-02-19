@@ -30,6 +30,7 @@ struct AppState {
     show_highlight: bool,
     show_eyebrow: bool,
     show_eyelash: bool,
+    show_sidebar: bool,
     focus_distance: f32,
     mouse_position: Option<winit::dpi::PhysicalPosition<f64>>,
     start_time: Instant,
@@ -133,6 +134,7 @@ impl ApplicationHandler for App {
                 show_highlight: true,
                 show_eyebrow: true,
                 show_eyelash: true,
+                show_sidebar: true,
                 focus_distance: 20.0,
                 mouse_position: None,
                 start_time: Instant::now(),
@@ -154,6 +156,21 @@ impl ApplicationHandler for App {
         let Some(state) = &mut self.state else {
             return;
         };
+
+        // Intercept Tab before egui consumes it
+        if let WindowEvent::KeyboardInput {
+            event:
+                KeyEvent {
+                    logical_key: Key::Named(NamedKey::Tab),
+                    state: ElementState::Pressed,
+                    ..
+                },
+            ..
+        } = &event
+        {
+            state.show_sidebar = !state.show_sidebar;
+            return;
+        }
 
         // Pass events to egui first
         let egui_response = state.egui_state.on_window_event(&state.window, &event);
@@ -259,8 +276,11 @@ impl ApplicationHandler for App {
 
                 // --- egui frame ---
                 let raw_input = state.egui_state.take_egui_input(&state.window);
+                let show_sidebar = state.show_sidebar;
                 let full_output = state.egui_ctx.run(raw_input, |ctx| {
-                    eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape, &mut state.eyebrow_shape, &mut state.eyelash_shape, &mut state.auto_blink, &mut state.follow_mouse, &mut state.show_highlight, &mut state.show_eyebrow, &mut state.show_eyelash, &mut state.focus_distance);
+                    if show_sidebar {
+                        eye_control_panel(ctx, &mut state.uniforms, &mut state.eye_shape, &mut state.eyebrow_shape, &mut state.eyelash_shape, &mut state.auto_blink, &mut state.follow_mouse, &mut state.show_highlight, &mut state.show_eyebrow, &mut state.show_eyelash, &mut state.focus_distance);
+                    }
                 });
 
                 state
