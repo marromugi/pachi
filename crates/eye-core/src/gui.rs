@@ -105,6 +105,25 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
                             .text("Follow Rate"),
                     );
                     eyebrow_outline_editor(ui, &mut eyebrow_shape.outline, "eyebrow_shape");
+                    // Tip thickness sliders (Left=0, Right=2)
+                    for &(idx, label) in &[(0usize, "Tip L"), (2usize, "Tip R")] {
+                        let a = &eyebrow_shape.outline.anchors[idx];
+                        let len_in = (a.handle_in[0].powi(2) + a.handle_in[1].powi(2)).sqrt();
+                        let len_out = (a.handle_out[0].powi(2) + a.handle_out[1].powi(2)).sqrt();
+                        let mut thickness = len_in.max(len_out);
+                        let old = thickness;
+                        ui.add(
+                            egui::Slider::new(&mut thickness, 0.001..=0.15)
+                                .text(label),
+                        );
+                        if (thickness - old).abs() > 1e-6 {
+                            let s = thickness / old.max(0.001);
+                            eyebrow_shape.outline.anchors[idx].handle_in[0] *= s;
+                            eyebrow_shape.outline.anchors[idx].handle_in[1] *= s;
+                            eyebrow_shape.outline.anchors[idx].handle_out[0] *= s;
+                            eyebrow_shape.outline.anchors[idx].handle_out[1] *= s;
+                        }
+                    }
                     ui.horizontal(|ui| {
                         if ui.button("Reset Eyebrow").clicked() {
                             *eyebrow_shape = EyebrowShape::default();
@@ -383,7 +402,7 @@ fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_
 // ============================================================
 
 // Drag target encoding: 0-3 = anchor[i], 4-7 = handle_in[i-4],
-// 8-11 = handle_out[i-8], 12-15 = thickness_ring[i-12]
+// 8-11 = handle_out[i-8]
 
 fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_id: &str) {
     let available_width = ui.available_width();
@@ -407,15 +426,23 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
         ]
     };
 
-    // Compute ring radii (eye-space) per anchor
-    let ring_radii: [f32; 4] = std::array::from_fn(|i| {
-        let a = &outline.anchors[i];
-        let len_in = (a.handle_in[0].powi(2) + a.handle_in[1].powi(2)).sqrt();
-        let len_out = (a.handle_out[0].powi(2) + a.handle_out[1].powi(2)).sqrt();
-        len_in.max(len_out)
-    });
-
-    const MIN_RING_DISPLAY_RADIUS: f32 = 12.0;
+    // Extend handle display position to ensure minimum distance from anchor (screen pixels).
+    let min_handle_display_dist = 25.0f32;
+    let extend_handle = |anchor_pos: [f32; 2], handle_offset: [f32; 2]| -> [f32; 2] {
+        let abs = [anchor_pos[0] + handle_offset[0], anchor_pos[1] + handle_offset[1]];
+        let scr_anchor = to_screen(anchor_pos);
+        let scr_handle = to_screen(abs);
+        let dist = scr_anchor.distance(scr_handle);
+        if dist < min_handle_display_dist && dist > 1e-3 {
+            let dir_x = scr_handle.x - scr_anchor.x;
+            let dir_y = scr_handle.y - scr_anchor.y;
+            let s = min_handle_display_dist / dist;
+            let extended = egui::pos2(scr_anchor.x + dir_x * s, scr_anchor.y + dir_y * s);
+            from_screen(extended)
+        } else {
+            abs
+        }
+    };
 
     // --- Drag state ---
     let drag_id = response.id.with(editor_id).with("drag");
@@ -423,7 +450,6 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
 
     // Find hovered element (for visual feedback)
     let hover_threshold = 12.0f32;
-    let ring_edge_threshold = 8.0f32;
     let mut hovered_idx: i32 = DRAG_NONE;
     if drag_idx == DRAG_NONE {
         if let Some(pos) = response.hover_pos() {
@@ -436,31 +462,17 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
                     best_dist = d;
                     hovered_idx = i as i32;
                 }
-                let hi = [a.position[0] + a.handle_in[0], a.position[1] + a.handle_in[1]];
+                let hi = extend_handle(a.position, a.handle_in);
                 let d = pos.distance(to_screen(hi));
                 if d < best_dist {
                     best_dist = d;
                     hovered_idx = 4 + i as i32;
                 }
-                let ho = [a.position[0] + a.handle_out[0], a.position[1] + a.handle_out[1]];
+                let ho = extend_handle(a.position, a.handle_out);
                 let d = pos.distance(to_screen(ho));
                 if d < best_dist {
                     best_dist = d;
                     hovered_idx = 8 + i as i32;
-                }
-            }
-            // Second pass: thickness rings on tip anchors only (Left=0, Right=2)
-            if hovered_idx == DRAG_NONE {
-                let mut best_ring_dist = ring_edge_threshold;
-                for i in [0, 2] {
-                    let a_scr = to_screen(outline.anchors[i].position);
-                    let display_r = (ring_radii[i] * scale).max(MIN_RING_DISPLAY_RADIUS);
-                    let dist_to_center = pos.distance(a_scr);
-                    let dist_to_edge = (dist_to_center - display_r).abs();
-                    if dist_to_edge < best_ring_dist {
-                        best_ring_dist = dist_to_edge;
-                        hovered_idx = 12 + i as i32;
-                    }
                 }
             }
         }
@@ -478,19 +490,6 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
         [egui::pos2(center.x, rect.top()), egui::pos2(center.x, rect.bottom())],
         egui::Stroke::new(0.5, grid_color),
     );
-
-    // --- Draw thickness rings on tip anchors only (Left=0, Right=2) ---
-    let ring_color = egui::Color32::from_rgb(0, 200, 220);
-    let ring_hover_color = egui::Color32::from_rgb(100, 255, 255);
-
-    for i in [0, 2] {
-        let a_scr = to_screen(outline.anchors[i].position);
-        let display_r = (ring_radii[i] * scale).max(MIN_RING_DISPLAY_RADIUS);
-        let active = hovered_idx == 12 + i as i32 || drag_idx == 12 + i as i32;
-        let stroke_width = if active { 2.5 } else { 1.5 };
-        let color = if active { ring_hover_color } else { ring_color };
-        painter.circle_stroke(a_scr, display_r, egui::Stroke::new(stroke_width, color));
-    }
 
     // --- Draw Bezier curve segments ---
     let curve_color = egui::Color32::from_rgb(220, 220, 220);
@@ -532,8 +531,8 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
 
     for i in 0..4 {
         let a = &anchors[i];
-        let hi = [a.position[0] + a.handle_in[0], a.position[1] + a.handle_in[1]];
-        let ho = [a.position[0] + a.handle_out[0], a.position[1] + a.handle_out[1]];
+        let hi = extend_handle(a.position, a.handle_in);
+        let ho = extend_handle(a.position, a.handle_out);
         let hi_scr = to_screen(hi);
         let ho_scr = to_screen(ho);
 
@@ -568,14 +567,14 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
                     drag_idx = i as i32;
                 }
 
-                let hi = [a.position[0] + a.handle_in[0], a.position[1] + a.handle_in[1]];
+                let hi = extend_handle(a.position, a.handle_in);
                 let d = pos.distance(to_screen(hi));
                 if d < best_dist {
                     best_dist = d;
                     drag_idx = 4 + i as i32;
                 }
 
-                let ho = [a.position[0] + a.handle_out[0], a.position[1] + a.handle_out[1]];
+                let ho = extend_handle(a.position, a.handle_out);
                 let d = pos.distance(to_screen(ho));
                 if d < best_dist {
                     best_dist = d;
@@ -583,20 +582,6 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
                 }
             }
 
-            // Check thickness rings on tips only (lower priority)
-            if drag_idx == DRAG_NONE {
-                let mut best_ring_dist = ring_edge_threshold;
-                for i in [0, 2] {
-                    let a_scr = to_screen(outline.anchors[i].position);
-                    let display_r = (ring_radii[i] * scale).max(MIN_RING_DISPLAY_RADIUS);
-                    let dist_to_center = pos.distance(a_scr);
-                    let dist_to_edge = (dist_to_center - display_r).abs();
-                    if dist_to_edge < best_ring_dist {
-                        best_ring_dist = dist_to_edge;
-                        drag_idx = 12 + i as i32;
-                    }
-                }
-            }
         }
     }
 
@@ -614,28 +599,31 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
             } else if drag_idx < 8 {
                 let i = (drag_idx - 4) as usize;
                 let anchor = outline.anchors[i].position;
-                outline.anchors[i].handle_in = [p[0] - anchor[0], p[1] - anchor[1]];
+                let new_hi = [p[0] - anchor[0], p[1] - anchor[1]];
+                // Tips (Left=0, Right=2): preserve handle length, change angle only
+                if i == 0 || i == 2 {
+                    let old_len = (outline.anchors[i].handle_in[0].powi(2) + outline.anchors[i].handle_in[1].powi(2)).sqrt();
+                    let new_len = (new_hi[0].powi(2) + new_hi[1].powi(2)).sqrt().max(1e-6);
+                    let s = old_len / new_len;
+                    outline.anchors[i].handle_in = [new_hi[0] * s, new_hi[1] * s];
+                } else {
+                    outline.anchors[i].handle_in = new_hi;
+                }
                 outline.anchors[i].enforce_collinear_from_in();
-            } else if drag_idx < 12 {
+            } else {
                 let i = (drag_idx - 8) as usize;
                 let anchor = outline.anchors[i].position;
-                outline.anchors[i].handle_out = [p[0] - anchor[0], p[1] - anchor[1]];
+                let new_ho = [p[0] - anchor[0], p[1] - anchor[1]];
+                // Tips (Left=0, Right=2): preserve handle length, change angle only
+                if i == 0 || i == 2 {
+                    let old_len = (outline.anchors[i].handle_out[0].powi(2) + outline.anchors[i].handle_out[1].powi(2)).sqrt();
+                    let new_len = (new_ho[0].powi(2) + new_ho[1].powi(2)).sqrt().max(1e-6);
+                    let s = old_len / new_len;
+                    outline.anchors[i].handle_out = [new_ho[0] * s, new_ho[1] * s];
+                } else {
+                    outline.anchors[i].handle_out = new_ho;
+                }
                 outline.anchors[i].enforce_collinear_from_out();
-            } else {
-                // Dragging thickness ring — scale both handles uniformly
-                let i = (drag_idx - 12) as usize;
-                let anchor = outline.anchors[i].position;
-                let new_dist = ((p[0] - anchor[0]).powi(2) + (p[1] - anchor[1]).powi(2)).sqrt();
-
-                let len_in = (outline.anchors[i].handle_in[0].powi(2) + outline.anchors[i].handle_in[1].powi(2)).sqrt();
-                let len_out = (outline.anchors[i].handle_out[0].powi(2) + outline.anchors[i].handle_out[1].powi(2)).sqrt();
-                let current_max = len_in.max(len_out).max(0.003);
-
-                let s = new_dist / current_max;
-                outline.anchors[i].handle_in[0] *= s;
-                outline.anchors[i].handle_in[1] *= s;
-                outline.anchors[i].handle_out[0] *= s;
-                outline.anchors[i].handle_out[1] *= s;
             }
         }
     }
