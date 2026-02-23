@@ -43,14 +43,14 @@ struct Uniforms {
     // Bezier outline: closed state (128 bytes)
     outline_closed: array<vec4f, 8>,
 
-    // Eyebrow (160 bytes)
+    // Eyebrow (224 bytes)
     eyebrow_color: vec3f,
     eyebrow_base_y: f32,
     eyebrow_follow: f32,
     _pad_eyebrow_a: f32,
     _pad_eyebrow_b: f32,
     _pad_eyebrow_c: f32,
-    eyebrow_outline: array<vec4f, 8>,
+    eyebrow_outline: array<vec4f, 12>,
 
     // Eyelash (16 bytes) — stroke on upper eye outline
     eyelash_color: vec3f,
@@ -59,6 +59,12 @@ struct Uniforms {
     // Pupil (16 bytes) — dark circle at center of iris
     pupil_color: vec3f,
     pupil_radius: f32,
+
+    // Iris Bezier outline (128 bytes)
+    iris_outline: array<vec4f, 8>,
+
+    // Pupil Bezier outline (128 bytes)
+    pupil_outline: array<vec4f, 8>,
 }
 
 struct EyePair {
@@ -195,7 +201,7 @@ fn eval_eyebrow_outline(p: vec2f, close_t: f32) -> f32 {
     var min_d2 = 1e10;
     var winding = 0.0;
 
-    for (var seg = 0u; seg < 4u; seg++) {
+    for (var seg = 0u; seg < 6u; seg++) {
         let idx = seg * 2u;
         let cp0 = u.eyebrow_outline[idx];
         let cp1 = u.eyebrow_outline[idx + 1u];
@@ -222,15 +228,87 @@ fn eval_eyebrow_outline(p: vec2f, close_t: f32) -> f32 {
 }
 
 // ============================================================
+// Evaluate iris outline: returns signed distance
+// (negative = inside, positive = outside)
+// ============================================================
+
+fn eval_iris_outline(p: vec2f) -> f32 {
+    var min_d2 = 1e10;
+    var winding = 0.0;
+
+    for (var seg = 0u; seg < 4u; seg++) {
+        let idx = seg * 2u;
+        let cp0 = u.iris_outline[idx];
+        let cp1 = u.iris_outline[idx + 1u];
+
+        let P0 = cp0.xy;
+        let P1 = cp0.zw;
+        let P2 = cp1.xy;
+        let P3 = cp1.zw;
+
+        var prev = P0;
+        for (var i = 1u; i <= SUBDIV; i++) {
+            let t = f32(i) / f32(SUBDIV);
+            let curr = cubic_bezier(t, P0, P1, P2, P3);
+            let result = point_segment_test(p, prev, curr);
+            min_d2 = min(min_d2, result.x);
+            winding += result.y;
+            prev = curr;
+        }
+    }
+
+    let dist = sqrt(min_d2);
+    let sign_val = select(1.0, -1.0, winding != 0.0);
+    return dist * sign_val;
+}
+
+// ============================================================
+// Evaluate pupil outline: returns signed distance
+// (negative = inside, positive = outside)
+// ============================================================
+
+fn eval_pupil_outline(p: vec2f) -> f32 {
+    var min_d2 = 1e10;
+    var winding = 0.0;
+
+    for (var seg = 0u; seg < 4u; seg++) {
+        let idx = seg * 2u;
+        let cp0 = u.pupil_outline[idx];
+        let cp1 = u.pupil_outline[idx + 1u];
+
+        let P0 = cp0.xy;
+        let P1 = cp0.zw;
+        let P2 = cp1.xy;
+        let P3 = cp1.zw;
+
+        var prev = P0;
+        for (var i = 1u; i <= SUBDIV; i++) {
+            let t = f32(i) / f32(SUBDIV);
+            let curr = cubic_bezier(t, P0, P1, P2, P3);
+            let result = point_segment_test(p, prev, curr);
+            min_d2 = min(min_d2, result.x);
+            winding += result.y;
+            prev = curr;
+        }
+    }
+
+    let dist = sqrt(min_d2);
+    let sign_val = select(1.0, -1.0, winding != 0.0);
+    return dist * sign_val;
+}
+
+// ============================================================
 // Render eyebrow at local coordinates.
 // Same foreshortening/mirroring as the eye, but no squash_stretch.
 // ============================================================
 
-fn render_eyebrow(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
+fn render_eyebrow(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32, rest_h_scale: f32) -> vec4f {
     let foreshortened = vec2f(p.x / h_scale, p.y / v_scale);
     let local_p = vec2f(foreshortened.x * mirror, foreshortened.y);
 
-    let d_brow = eval_eyebrow_outline(local_p, u.eyelid_close);
+    // Apply rest_h_scale to cancel rest-position foreshortening (WYSIWYG at yaw=0)
+    let corrected_p = vec2f(local_p.x * rest_h_scale, local_p.y);
+    let d_brow = eval_eyebrow_outline(corrected_p, u.eyelid_close);
     let aa = fwidth(d_brow) * 0.5;
     let brow_mask = 1.0 - smoothstep(-aa, aa, d_brow);
 
@@ -290,7 +368,7 @@ fn eval_upper_outline_dist(p: vec2f, close_t: f32) -> vec2f {
 // Tapers from full thickness at center to ~1px at tips.
 // ============================================================
 
-fn render_eyelash(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
+fn render_eyelash(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32, rest_h_scale: f32) -> vec4f {
     let foreshortened = vec2f(p.x / h_scale, p.y / v_scale);
     let local_p = vec2f(foreshortened.x * mirror, foreshortened.y);
 
@@ -298,14 +376,16 @@ fn render_eyelash(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
     let ss_scale = 1.0 + u.squash_stretch;
     let sq_p = vec2f(local_p.x / ss_scale, local_p.y * ss_scale);
 
-    let result = eval_upper_outline_dist(sq_p, u.eyelid_close);
+    // Apply rest_h_scale to match outline correction
+    let corrected_p = vec2f(sq_p.x * rest_h_scale, sq_p.y);
+    let result = eval_upper_outline_dist(corrected_p, u.eyelid_close);
     let dist = result.x;
     let t_along = result.y;  // 0=Left tip, 0.5=Top center, 1=Right tip
 
     // Taper: sin curve peaks at center, fades to ~0 at tips
     let taper = sin(t_along * 3.14159265);
     // Ensure minimum ~1px visible at tips
-    let pixel_size = fwidth(sq_p.x);
+    let pixel_size = fwidth(corrected_p.x);
     let effective_thickness = max(u.eyelash_thickness * taper, pixel_size * 0.5);
 
     let aa = fwidth(dist) * 0.5;
@@ -324,7 +404,7 @@ fn render_eyelash(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
 // Returns (color, alpha).
 // ============================================================
 
-fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
+fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32, rest_h_scale: f32) -> vec4f {
     let foreshortened = vec2f(p.x / h_scale, p.y / v_scale);
     let local_p = vec2f(foreshortened.x * mirror, foreshortened.y);
 
@@ -333,7 +413,9 @@ fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
     let sq_p = vec2f(local_p.x / ss_scale, local_p.y * ss_scale);
 
     // --- Outline (replaces sclera ellipse + eyelid clipping) ---
-    let d_outline = eval_outline(sq_p, u.eyelid_close);
+    // Apply rest_h_scale to cancel rest-position foreshortening (WYSIWYG at yaw=0)
+    let outline_p = vec2f(sq_p.x * rest_h_scale, sq_p.y);
+    let d_outline = eval_outline(outline_p, u.eyelid_close);
     let aa = fwidth(d_outline) * 0.5;
     let outline_mask = 1.0 - smoothstep(-aa, aa, d_outline);
 
@@ -350,20 +432,23 @@ fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
         u.look_y * u.iris_follow
     );
     let iris_p = sq_p - iris_offset;
-    let d_iris = sd_circle(iris_p, u.iris_radius);
+    // Correct iris/pupil query coords: multiply x by rest_h_scale to cancel
+    // the rest-position foreshortening, so editor shapes = screen shapes at yaw=0.
+    let iris_p_shape = vec2f(iris_p.x * rest_h_scale, iris_p.y);
+    let d_iris = eval_iris_outline(iris_p_shape);
     let aa_i = fwidth(d_iris) * 0.5;
     let iris_mask = 1.0 - smoothstep(-aa_i, aa_i, d_iris);
     eye_color = mix(eye_color, u.iris_color, iris_mask);
 
     // --- Pupil (center of iris) ---
-    let d_pupil = sd_circle(iris_p, u.pupil_radius);
+    let d_pupil = eval_pupil_outline(iris_p_shape);
     let aa_p = fwidth(d_pupil) * 0.5;
     let pupil_mask = 1.0 - smoothstep(-aa_p, aa_p, d_pupil);
     eye_color = mix(eye_color, u.pupil_color, pupil_mask);
 
     // --- Highlight (additive, over everything) ---
     let look_shift = vec2f(u.look_x * 0.05, u.look_y * 0.05);
-    let hl_p = sq_p - u.highlight_offset - look_shift;
+    let hl_p = outline_p - u.highlight_offset - look_shift;
     let d_hl = sd_circle(hl_p, u.highlight_radius);
     let aa_h = fwidth(d_hl) * 0.5;
     let hl_mask = 1.0 - smoothstep(-aa_h, aa_h, d_hl);
@@ -395,6 +480,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 
     // Angular half-separation of eyes on the sphere
     let half_sep = clamp(g.eye_angle, 0.01, 1.5);
+
+    // Rest-position foreshortening factor for iris/pupil WYSIWYG correction.
+    // At yaw=0, h_scale = cos(half_sep). Multiplying iris/pupil query coords
+    // by this factor cancels the rest foreshortening so editor shapes = screen shapes.
+    let rest_h_scale = cos(half_sep);
 
     // Sphere radius: at yaw=0, eye_separation/2 = R * sin(half_sep)
     let R = g.eye_separation * 0.5 / sin(half_sep);
@@ -433,11 +523,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         if left_lx < BBOX_HX && left_ly < BBOX_HY {
             let fade = (1.0 - smoothstep(BBOX_HX - BBOX_FADE, BBOX_HX, left_lx))
                      * (1.0 - smoothstep(BBOX_HY - BBOX_FADE, BBOX_HY, left_ly));
-            let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale);
+            let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale, rest_h_scale);
             color = mix(color, left_brow.xyz, left_brow.w * fade);
-            let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
+            let left = render_eye(left_p, 1.0, left_h_scale, v_scale, rest_h_scale);
             color = mix(color, left.xyz, left.w * fade);
-            let left_lash = render_eyelash(left_p, 1.0, left_h_scale, v_scale);
+            let left_lash = render_eyelash(left_p, 1.0, left_h_scale, v_scale, rest_h_scale);
             color = mix(color, left_lash.xyz, left_lash.w * fade);
         }
 
@@ -448,11 +538,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         if right_lx < BBOX_HX && right_ly < BBOX_HY {
             let fade = (1.0 - smoothstep(BBOX_HX - BBOX_FADE, BBOX_HX, right_lx))
                      * (1.0 - smoothstep(BBOX_HY - BBOX_FADE, BBOX_HY, right_ly));
-            let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale);
+            let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale, rest_h_scale);
             color = mix(color, right_brow.xyz, right_brow.w * fade);
-            let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
+            let right = render_eye(right_p, -1.0, right_h_scale, v_scale, rest_h_scale);
             color = mix(color, right.xyz, right.w * fade);
-            let right_lash = render_eyelash(right_p, -1.0, right_h_scale, v_scale);
+            let right_lash = render_eyelash(right_p, -1.0, right_h_scale, v_scale, rest_h_scale);
             color = mix(color, right_lash.xyz, right_lash.w * fade);
         }
     } else {
@@ -463,11 +553,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         if right_lx < BBOX_HX && right_ly < BBOX_HY {
             let fade = (1.0 - smoothstep(BBOX_HX - BBOX_FADE, BBOX_HX, right_lx))
                      * (1.0 - smoothstep(BBOX_HY - BBOX_FADE, BBOX_HY, right_ly));
-            let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale);
+            let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale, rest_h_scale);
             color = mix(color, right_brow.xyz, right_brow.w * fade);
-            let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
+            let right = render_eye(right_p, -1.0, right_h_scale, v_scale, rest_h_scale);
             color = mix(color, right.xyz, right.w * fade);
-            let right_lash = render_eyelash(right_p, -1.0, right_h_scale, v_scale);
+            let right_lash = render_eyelash(right_p, -1.0, right_h_scale, v_scale, rest_h_scale);
             color = mix(color, right_lash.xyz, right_lash.w * fade);
         }
 
@@ -478,11 +568,11 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
         if left_lx < BBOX_HX && left_ly < BBOX_HY {
             let fade = (1.0 - smoothstep(BBOX_HX - BBOX_FADE, BBOX_HX, left_lx))
                      * (1.0 - smoothstep(BBOX_HY - BBOX_FADE, BBOX_HY, left_ly));
-            let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale);
+            let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale, rest_h_scale);
             color = mix(color, left_brow.xyz, left_brow.w * fade);
-            let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
+            let left = render_eye(left_p, 1.0, left_h_scale, v_scale, rest_h_scale);
             color = mix(color, left.xyz, left.w * fade);
-            let left_lash = render_eyelash(left_p, 1.0, left_h_scale, v_scale);
+            let left_lash = render_eyelash(left_p, 1.0, left_h_scale, v_scale, rest_h_scale);
             color = mix(color, left_lash.xyz, left_lash.w * fade);
         }
     }

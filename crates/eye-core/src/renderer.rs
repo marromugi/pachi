@@ -1,4 +1,4 @@
-use crate::outline::BezierOutline;
+use crate::outline::{BezierOutline, EyebrowOutline};
 
 /// GPU uniform structure for a single canonical eye.
 /// The shader mirrors the X coordinate to render two eyes.
@@ -49,25 +49,32 @@ pub struct EyeUniforms {
     // -- Bezier outline closed -- (128 bytes, offset 240)
     pub outline_closed: [[f32; 4]; 8],
 
-    // -- Eyebrow -- (160 bytes, offset 368)
+    // -- Eyebrow -- (224 bytes, offset 368)
     pub eyebrow_color: [f32; 3],         // offset 368 | vec3f
     pub eyebrow_base_y: f32,             // offset 380 | base Y position above eye
     pub eyebrow_follow: f32,             // offset 384 | eyelid follow rate
     pub _pad_eyebrow: [f32; 3],          // offset 388 | padding to 16-byte boundary
-    pub eyebrow_outline: [[f32; 4]; 8],  // offset 400 | Bezier control points
+    pub eyebrow_outline: [[f32; 4]; 12], // offset 400 | 6-segment Bezier control points
 
-    // -- Eyelash -- (16 bytes, offset 528)
+    // -- Eyelash -- (16 bytes, offset 592)
     // Rendered as a stroke on the upper eye outline (no separate shape).
-    pub eyelash_color: [f32; 3],         // offset 528 | vec3f
-    pub eyelash_thickness: f32,          // offset 540 | stroke thickness
+    pub eyelash_color: [f32; 3],         // offset 592 | vec3f
+    pub eyelash_thickness: f32,          // offset 604 | stroke thickness
 
-    // -- Pupil -- (16 bytes, offset 544)
-    pub pupil_color: [f32; 3],           // offset 544 | vec3f
-    pub pupil_radius: f32,              // offset 556 | pupil circle radius
+    // -- Pupil -- (16 bytes, offset 608)
+    pub pupil_color: [f32; 3],           // offset 608 | vec3f
+    pub pupil_radius: f32,              // offset 620 | pupil circle radius (used for reset)
+
+    // -- Iris Bezier outline -- (128 bytes, offset 624)
+    // 4 segments x 2 vec4f each. Same layout as outline_open/closed.
+    pub iris_outline: [[f32; 4]; 8],
+
+    // -- Pupil Bezier outline -- (128 bytes, offset 752)
+    pub pupil_outline: [[f32; 4]; 8],
 }
-// Total: 560 bytes (= 16 * 35)
+// Total: 880 bytes (= 16 * 55)
 
-const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 560);
+const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 880);
 
 /// Paired uniform structure: one set per eye.
 /// The shader reads `pair.left` for the left eye and `pair.right` for the right eye.
@@ -81,7 +88,7 @@ pub struct EyePairUniforms {
 }
 // Total: 1120 bytes (= 560 * 2)
 
-const _: () = assert!(std::mem::size_of::<EyePairUniforms>() == 1120);
+const _: () = assert!(std::mem::size_of::<EyePairUniforms>() == 1760);
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -111,7 +118,7 @@ impl Default for EyeUniforms {
 
             // Iris
             iris_color: [0.112, 0.126, 0.214],
-            iris_radius: 0.2,
+            iris_radius: 0.15,
             iris_follow: 0.14,
             _pad_iris: [0.0, 0.0, 0.0],
 
@@ -124,7 +131,7 @@ impl Default for EyeUniforms {
             eyebrow_base_y: 0.48,
             eyebrow_follow: 0.15,
             _pad_eyebrow: [0.0, 0.0, 0.0],
-            eyebrow_outline: BezierOutline::eyebrow_arc(0.30, 0.04).to_uniform_array(),
+            eyebrow_outline: EyebrowOutline::eyebrow_arc(0.30, 0.04).to_uniform_array(),
 
             // Eyelash
             eyelash_color: [0.009, 0.009, 0.035],
@@ -132,7 +139,13 @@ impl Default for EyeUniforms {
 
             // Pupil
             pupil_color: [0.013, 0.013, 0.030],
-            pupil_radius: 0.08,
+            pupil_radius: 0.05,
+
+            // Iris outline
+            iris_outline: BezierOutline::circle(0.15).to_uniform_array(),
+
+            // Pupil outline
+            pupil_outline: BezierOutline::circle(0.08).to_uniform_array(),
         }
     }
 }

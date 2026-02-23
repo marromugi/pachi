@@ -142,7 +142,7 @@ impl ApplicationHandler for App {
                 show_eyebrow: true,
                 show_eyelash: true,
                 show_sidebar: true,
-                focus_distance: 20.0,
+                focus_distance: 1.5,
                 mouse_position: None,
                 start_time: Instant::now(),
                 egui_ctx,
@@ -312,6 +312,16 @@ impl ApplicationHandler for App {
                 state.left.uniforms.eyelash_thickness = state.left.eyelash_shape.thickness;
                 state.right.uniforms.eyelash_color = state.right.eyelash_shape.color;
                 state.right.uniforms.eyelash_thickness = state.right.eyelash_shape.thickness;
+
+                // Sync iris/pupil shapes into uniforms
+                state.left.uniforms.iris_outline =
+                    state.left.iris_shape.outline.to_uniform_array();
+                state.right.uniforms.iris_outline =
+                    state.right.iris_shape.outline.to_uniform_array();
+                state.left.uniforms.pupil_outline =
+                    state.left.pupil_shape.outline.to_uniform_array();
+                state.right.uniforms.pupil_outline =
+                    state.right.pupil_shape.outline.to_uniform_array();
 
                 // Sync global params left → right
                 state.right.uniforms.bg_color = state.left.uniforms.bg_color;
