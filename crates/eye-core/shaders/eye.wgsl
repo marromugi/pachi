@@ -73,7 +73,7 @@ struct VertexOutput {
 // Constants
 // ============================================================
 
-const SUBDIV: u32 = 32u;
+const SUBDIV: u32 = 16u;
 
 // ============================================================
 // Vertex shader: fullscreen triangle
@@ -407,38 +407,69 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 
     // --- Render order: farther eye first, closer eye on top ---
     // Per eye: eyebrow first (behind), then eye on top.
+    // Bounding box half-extents in local (pre-foreshortening) space.
+    // Conservative: covers eye (~0.35) + eyebrow (base_y ~0.48 + height ~0.08)
+    // + margin for squash_stretch and anti-aliasing.
+    const BBOX_HX: f32 = 0.70;
+    const BBOX_HY: f32 = 0.90;
+    const BBOX_FADE: f32 = 0.10;
+
     if left_h_scale <= right_h_scale {
         let left_p = p - left_center;
-        let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale);
-        color = mix(color, left_brow.xyz, left_brow.w);
-        let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
-        color = mix(color, left.xyz, left.w);
-        let left_lash = render_eyelash(left_p, 1.0, left_h_scale, v_scale);
-        color = mix(color, left_lash.xyz, left_lash.w);
+        let left_lx = abs(left_p.x) / left_h_scale;
+        let left_ly = abs(left_p.y) / v_scale;
+        if left_lx < BBOX_HX && left_ly < BBOX_HY {
+            let fade = (1.0 - smoothstep(BBOX_HX - BBOX_FADE, BBOX_HX, left_lx))
+                     * (1.0 - smoothstep(BBOX_HY - BBOX_FADE, BBOX_HY, left_ly));
+            let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale);
+            color = mix(color, left_brow.xyz, left_brow.w * fade);
+            let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
+            color = mix(color, left.xyz, left.w * fade);
+            let left_lash = render_eyelash(left_p, 1.0, left_h_scale, v_scale);
+            color = mix(color, left_lash.xyz, left_lash.w * fade);
+        }
 
         let right_p = p - right_center;
-        let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale);
-        color = mix(color, right_brow.xyz, right_brow.w);
-        let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
-        color = mix(color, right.xyz, right.w);
-        let right_lash = render_eyelash(right_p, -1.0, right_h_scale, v_scale);
-        color = mix(color, right_lash.xyz, right_lash.w);
+        let right_lx = abs(right_p.x) / right_h_scale;
+        let right_ly = abs(right_p.y) / v_scale;
+        if right_lx < BBOX_HX && right_ly < BBOX_HY {
+            let fade = (1.0 - smoothstep(BBOX_HX - BBOX_FADE, BBOX_HX, right_lx))
+                     * (1.0 - smoothstep(BBOX_HY - BBOX_FADE, BBOX_HY, right_ly));
+            let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale);
+            color = mix(color, right_brow.xyz, right_brow.w * fade);
+            let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
+            color = mix(color, right.xyz, right.w * fade);
+            let right_lash = render_eyelash(right_p, -1.0, right_h_scale, v_scale);
+            color = mix(color, right_lash.xyz, right_lash.w * fade);
+        }
     } else {
         let right_p = p - right_center;
-        let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale);
-        color = mix(color, right_brow.xyz, right_brow.w);
-        let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
-        color = mix(color, right.xyz, right.w);
-        let right_lash = render_eyelash(right_p, -1.0, right_h_scale, v_scale);
-        color = mix(color, right_lash.xyz, right_lash.w);
+        let right_lx = abs(right_p.x) / right_h_scale;
+        let right_ly = abs(right_p.y) / v_scale;
+        if right_lx < BBOX_HX && right_ly < BBOX_HY {
+            let fade = (1.0 - smoothstep(BBOX_HX - BBOX_FADE, BBOX_HX, right_lx))
+                     * (1.0 - smoothstep(BBOX_HY - BBOX_FADE, BBOX_HY, right_ly));
+            let right_brow = render_eyebrow(right_p, -1.0, right_h_scale, v_scale);
+            color = mix(color, right_brow.xyz, right_brow.w * fade);
+            let right = render_eye(right_p, -1.0, right_h_scale, v_scale);
+            color = mix(color, right.xyz, right.w * fade);
+            let right_lash = render_eyelash(right_p, -1.0, right_h_scale, v_scale);
+            color = mix(color, right_lash.xyz, right_lash.w * fade);
+        }
 
         let left_p = p - left_center;
-        let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale);
-        color = mix(color, left_brow.xyz, left_brow.w);
-        let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
-        color = mix(color, left.xyz, left.w);
-        let left_lash = render_eyelash(left_p, 1.0, left_h_scale, v_scale);
-        color = mix(color, left_lash.xyz, left_lash.w);
+        let left_lx = abs(left_p.x) / left_h_scale;
+        let left_ly = abs(left_p.y) / v_scale;
+        if left_lx < BBOX_HX && left_ly < BBOX_HY {
+            let fade = (1.0 - smoothstep(BBOX_HX - BBOX_FADE, BBOX_HX, left_lx))
+                     * (1.0 - smoothstep(BBOX_HY - BBOX_FADE, BBOX_HY, left_ly));
+            let left_brow = render_eyebrow(left_p, 1.0, left_h_scale, v_scale);
+            color = mix(color, left_brow.xyz, left_brow.w * fade);
+            let left = render_eye(left_p, 1.0, left_h_scale, v_scale);
+            color = mix(color, left.xyz, left.w * fade);
+            let left_lash = render_eyelash(left_p, 1.0, left_h_scale, v_scale);
+            color = mix(color, left_lash.xyz, left_lash.w * fade);
+        }
     }
 
     return vec4f(color, 1.0);

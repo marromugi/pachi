@@ -67,7 +67,7 @@ impl ApplicationHandler for App {
 
             let adapter = instance
                 .request_adapter(&wgpu::RequestAdapterOptions {
-                    power_preference: wgpu::PowerPreference::default(),
+                    power_preference: wgpu::PowerPreference::HighPerformance,
                     compatible_surface: Some(&surface),
                     force_fallback_adapter: false,
                 })
@@ -169,12 +169,14 @@ impl ApplicationHandler for App {
         } = &event
         {
             state.show_sidebar = !state.show_sidebar;
+            state.window.request_redraw();
             return;
         }
 
         // Pass events to egui first
         let egui_response = state.egui_state.on_window_event(&state.window, &event);
         if egui_response.consumed {
+            state.window.request_redraw();
             return;
         }
 
@@ -203,6 +205,9 @@ impl ApplicationHandler for App {
             }
             WindowEvent::CursorMoved { position, .. } => {
                 state.mouse_position = Some(position);
+                if state.follow_mouse {
+                    state.window.request_redraw();
+                }
             }
             WindowEvent::RedrawRequested => {
                 let output = match state.surface.get_current_texture() {
@@ -290,12 +295,15 @@ impl ApplicationHandler for App {
                 let paint_jobs = state
                     .egui_ctx
                     .tessellate(full_output.shapes, full_output.pixels_per_point);
+                let has_egui_content = !paint_jobs.is_empty();
 
-                // Update egui textures
-                for (id, delta) in &full_output.textures_delta.set {
-                    state
-                        .egui_renderer
-                        .update_texture(&state.device, &state.queue, *id, delta);
+                // Update egui textures only when there is content to render
+                if has_egui_content {
+                    for (id, delta) in &full_output.textures_delta.set {
+                        state
+                            .egui_renderer
+                            .update_texture(&state.device, &state.queue, *id, delta);
+                    }
                 }
 
                 let screen_descriptor = egui_wgpu::ScreenDescriptor {
@@ -313,14 +321,16 @@ impl ApplicationHandler for App {
                             label: Some("eye_encoder"),
                         });
 
-                // Update egui buffers
-                state.egui_renderer.update_buffers(
-                    &state.device,
-                    &state.queue,
-                    &mut encoder,
-                    &paint_jobs,
-                    &screen_descriptor,
-                );
+                // Update egui buffers only when there is content to render
+                if has_egui_content {
+                    state.egui_renderer.update_buffers(
+                        &state.device,
+                        &state.queue,
+                        &mut encoder,
+                        &paint_jobs,
+                        &screen_descriptor,
+                    );
+                }
 
                 // Render eye + egui overlay in same pass
                 {
@@ -364,12 +374,14 @@ impl ApplicationHandler for App {
                     pass.set_bind_group(0, state.renderer.bind_group(), &[]);
                     pass.draw(0..3, 0..1);
 
-                    // Draw egui overlay
-                    state.egui_renderer.render(
-                        &mut pass.forget_lifetime(),
-                        &paint_jobs,
-                        &screen_descriptor,
-                    );
+                    // Draw egui overlay (skip when nothing to render)
+                    if has_egui_content {
+                        state.egui_renderer.render(
+                            &mut pass.forget_lifetime(),
+                            &paint_jobs,
+                            &screen_descriptor,
+                        );
+                    }
                 }
 
                 // Free egui textures
@@ -380,7 +392,10 @@ impl ApplicationHandler for App {
                 state.queue.submit(std::iter::once(encoder.finish()));
                 output.present();
 
-                state.window.request_redraw();
+                // Only request next frame when animation is running
+                if state.auto_blink {
+                    state.window.request_redraw();
+                }
             }
             _ => {}
         }
