@@ -1,6 +1,6 @@
 use egui;
 
-use crate::outline::{BezierOutline, EyelashShape, EyeShape, EyebrowShape};
+use crate::outline::{BezierAnchor, BezierOutline, EyelashShape, EyeShape, EyebrowShape};
 use crate::EyeUniforms;
 
 // ============================================================
@@ -491,12 +491,92 @@ pub fn eye_control_panel(
 // Drag target encoding: 0-3 = anchor[i], 4-7 = handle_in[i-4], 8-11 = handle_out[i-8]
 const DRAG_NONE: i32 = -1;
 
+// ============================================================
+// Blender-style modal editing state
+// ============================================================
+
+#[derive(Clone, Debug)]
+struct BezierAnchorSnapshot {
+    position: [f32; 2],
+    handle_in: [f32; 2],
+    handle_out: [f32; 2],
+}
+
+impl BezierAnchorSnapshot {
+    fn from_anchor(a: &BezierAnchor) -> Self {
+        Self {
+            position: a.position,
+            handle_in: a.handle_in,
+            handle_out: a.handle_out,
+        }
+    }
+
+    fn restore_to(&self, a: &mut BezierAnchor) {
+        a.position = self.position;
+        a.handle_in = self.handle_in;
+        a.handle_out = self.handle_out;
+    }
+}
+
+fn snapshot_all(anchors: &[BezierAnchor; 4]) -> [BezierAnchorSnapshot; 4] {
+    core::array::from_fn(|i| BezierAnchorSnapshot::from_anchor(&anchors[i]))
+}
+
+fn restore_all(snaps: &[BezierAnchorSnapshot; 4], anchors: &mut [BezierAnchor; 4]) {
+    for (s, a) in snaps.iter().zip(anchors.iter_mut()) {
+        s.restore_to(a);
+    }
+}
+
+#[derive(Clone, Debug)]
+enum BezierEditMode {
+    Idle,
+    Grab {
+        point_idx: i32,
+        original_anchors: [BezierAnchorSnapshot; 4],
+        /// Mouse position (screen coords) at the moment G was pressed.
+        grab_origin: [f32; 2],
+    },
+    Scale {
+        anchor_idx: usize,
+        original_anchors: [BezierAnchorSnapshot; 4],
+        anchor_screen_pos: [f32; 2],
+        initial_mouse_dist: f32,
+    },
+    Rotate {
+        anchor_idx: usize,
+        original_anchors: [BezierAnchorSnapshot; 4],
+        anchor_screen_pos: [f32; 2],
+        initial_mouse_angle: f32,
+    },
+}
+
+#[derive(Clone, Debug)]
+struct BezierEditorState {
+    drag_idx: i32,
+    selected_idx: i32,
+    mode: BezierEditMode,
+    /// Skip the next click-to-select (set after modal confirm via click).
+    skip_click_select: bool,
+}
+
+impl Default for BezierEditorState {
+    fn default() -> Self {
+        Self {
+            drag_idx: DRAG_NONE,
+            selected_idx: DRAG_NONE,
+            mode: BezierEditMode::Idle,
+            skip_click_select: false,
+        }
+    }
+}
+
 fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_id: &str) {
     let available_width = ui.available_width();
     let size = available_width.min(300.0);
     let (response, painter) = ui.allocate_painter(
         egui::vec2(size, size),
-        egui::Sense::click_and_drag(),
+        egui::Sense::click_and_drag() | egui::Sense::FOCUSABLE,
     );
     let rect = response.rect;
 
@@ -514,14 +594,15 @@ fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_
         ]
     };
 
-    // --- Drag state ---
-    let drag_id = response.id.with(editor_id).with("drag");
-    let mut drag_idx: i32 = ui.memory(|m| m.data.get_temp(drag_id)).unwrap_or(DRAG_NONE);
+    // --- Editor state ---
+    let state_id = response.id.with(editor_id).with("editor_state");
+    let mut es: BezierEditorState =
+        ui.memory(|m| m.data.get_temp(state_id)).unwrap_or_default();
 
     // Find hovered point (for visual feedback)
     let hover_threshold = 12.0f32;
     let mut hovered_idx: i32 = DRAG_NONE;
-    if drag_idx == DRAG_NONE {
+    if es.drag_idx == DRAG_NONE && matches!(es.mode, BezierEditMode::Idle) {
         if let Some(pos) = response.hover_pos() {
             let mut best_dist = hover_threshold;
             for i in 0..4 {
@@ -598,6 +679,7 @@ fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_
     let handle_hover = egui::Color32::from_rgb(255, 220, 100);
     let anchor_color = egui::Color32::WHITE;
     let anchor_hover = egui::Color32::from_rgb(255, 255, 180);
+    let select_ring_color = egui::Color32::from_rgb(100, 180, 255);
 
     for i in 0..4 {
         let a = &anchors[i];
@@ -610,73 +692,146 @@ fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_
         painter.line_segment([hi_scr, ho_scr], egui::Stroke::new(1.0, handle_line_color));
 
         // Handle points
-        let hi_active = hovered_idx == 4 + i as i32 || drag_idx == 4 + i as i32;
-        let ho_active = hovered_idx == 8 + i as i32 || drag_idx == 8 + i as i32;
+        let hi_active = hovered_idx == 4 + i as i32 || es.drag_idx == 4 + i as i32 || es.selected_idx == 4 + i as i32;
+        let ho_active = hovered_idx == 8 + i as i32 || es.drag_idx == 8 + i as i32 || es.selected_idx == 8 + i as i32;
         painter.circle_filled(hi_scr, if hi_active { 5.0 } else { 3.5 }, if hi_active { handle_hover } else { handle_color });
         painter.circle_filled(ho_scr, if ho_active { 5.0 } else { 3.5 }, if ho_active { handle_hover } else { handle_color });
+
+        // Selection rings for handles
+        if es.selected_idx == 4 + i as i32 {
+            painter.circle_stroke(hi_scr, 7.0, egui::Stroke::new(1.5, select_ring_color));
+        }
+        if es.selected_idx == 8 + i as i32 {
+            painter.circle_stroke(ho_scr, 7.0, egui::Stroke::new(1.5, select_ring_color));
+        }
     }
 
     // Draw anchor points (on top of everything)
     for i in 0..4 {
         let a_scr = to_screen(anchors[i].position);
-        let active = hovered_idx == i as i32 || drag_idx == i as i32;
+        let active = hovered_idx == i as i32 || es.drag_idx == i as i32 || es.selected_idx == i as i32;
         painter.circle_filled(a_scr, if active { 7.0 } else { 5.0 }, if active { anchor_hover } else { anchor_color });
+
+        // Selection ring for anchor
+        if es.selected_idx == i as i32 {
+            painter.circle_stroke(a_scr, 9.0, egui::Stroke::new(1.5, select_ring_color));
+        }
     }
 
-    // --- Drag interaction ---
-    if response.drag_started() {
-        if let Some(pos) = response.interact_pointer_pos() {
+    // --- Mode indicator text ---
+    match &es.mode {
+        BezierEditMode::Grab { .. } => {
+            painter.text(
+                egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                "Grab (click=confirm, Esc=cancel)",
+                egui::FontId::proportional(11.0),
+                select_ring_color,
+            );
+        }
+        BezierEditMode::Scale { .. } => {
+            painter.text(
+                egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                "Scale (click=confirm, Esc=cancel)",
+                egui::FontId::proportional(11.0),
+                select_ring_color,
+            );
+        }
+        BezierEditMode::Rotate { .. } => {
+            painter.text(
+                egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                "Rotate (click=confirm, Esc=cancel)",
+                egui::FontId::proportional(11.0),
+                select_ring_color,
+            );
+        }
+        BezierEditMode::Idle => {}
+    }
+
+    // --- Click-to-select (only in Idle mode) ---
+    if matches!(es.mode, BezierEditMode::Idle) && response.clicked() {
+        if es.skip_click_select {
+            es.skip_click_select = false;
+        } else if let Some(pos) = response.interact_pointer_pos() {
             let threshold = 15.0f32;
             let mut best_dist = threshold;
-            drag_idx = DRAG_NONE;
-
+            let mut new_selected = DRAG_NONE;
             for i in 0..4 {
-                let a = &anchors[i];
-
-                // Check anchor
+                let a = &outline.anchors[i];
                 let d = pos.distance(to_screen(a.position));
                 if d < best_dist {
                     best_dist = d;
-                    drag_idx = i as i32;
+                    new_selected = i as i32;
                 }
-
-                // Check handle_in
                 let hi = [a.position[0] + a.handle_in[0], a.position[1] + a.handle_in[1]];
                 let d = pos.distance(to_screen(hi));
                 if d < best_dist {
                     best_dist = d;
-                    drag_idx = 4 + i as i32;
+                    new_selected = 4 + i as i32;
                 }
-
-                // Check handle_out
                 let ho = [a.position[0] + a.handle_out[0], a.position[1] + a.handle_out[1]];
                 let d = pos.distance(to_screen(ho));
                 if d < best_dist {
                     best_dist = d;
-                    drag_idx = 8 + i as i32;
+                    new_selected = 8 + i as i32;
+                }
+            }
+            es.selected_idx = new_selected;
+            if es.selected_idx >= 0 {
+                response.request_focus();
+            }
+        }
+    }
+
+    // --- Drag interaction (only in Idle mode) ---
+    if matches!(es.mode, BezierEditMode::Idle) && response.drag_started() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let threshold = 15.0f32;
+            let mut best_dist = threshold;
+            es.drag_idx = DRAG_NONE;
+
+            for i in 0..4 {
+                let a = &outline.anchors[i];
+
+                let d = pos.distance(to_screen(a.position));
+                if d < best_dist {
+                    best_dist = d;
+                    es.drag_idx = i as i32;
+                }
+
+                let hi = [a.position[0] + a.handle_in[0], a.position[1] + a.handle_in[1]];
+                let d = pos.distance(to_screen(hi));
+                if d < best_dist {
+                    best_dist = d;
+                    es.drag_idx = 4 + i as i32;
+                }
+
+                let ho = [a.position[0] + a.handle_out[0], a.position[1] + a.handle_out[1]];
+                let d = pos.distance(to_screen(ho));
+                if d < best_dist {
+                    best_dist = d;
+                    es.drag_idx = 8 + i as i32;
                 }
             }
         }
     }
 
-    if response.dragged() && drag_idx >= 0 {
+    if matches!(es.mode, BezierEditMode::Idle) && response.dragged() && es.drag_idx >= 0 {
         if let Some(pos) = response.interact_pointer_pos() {
             let p = from_screen(pos);
 
-            if drag_idx < 4 {
-                // Dragging an anchor point — only re-adjust this anchor's handles
-                let i = drag_idx as usize;
+            if es.drag_idx < 4 {
+                let i = es.drag_idx as usize;
                 outline.anchors[i].position = p;
-                outline.auto_adjust_handle_at(i);
-            } else if drag_idx < 8 {
-                // Dragging handle_in
-                let i = (drag_idx - 4) as usize;
+            } else if es.drag_idx < 8 {
+                let i = (es.drag_idx - 4) as usize;
                 let anchor = outline.anchors[i].position;
                 outline.anchors[i].handle_in = [p[0] - anchor[0], p[1] - anchor[1]];
                 outline.anchors[i].enforce_collinear_from_in();
             } else {
-                // Dragging handle_out
-                let i = (drag_idx - 8) as usize;
+                let i = (es.drag_idx - 8) as usize;
                 let anchor = outline.anchors[i].position;
                 outline.anchors[i].handle_out = [p[0] - anchor[0], p[1] - anchor[1]];
                 outline.anchors[i].enforce_collinear_from_out();
@@ -684,11 +839,155 @@ fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_
         }
     }
 
-    if response.drag_stopped() {
-        drag_idx = DRAG_NONE;
+    if matches!(es.mode, BezierEditMode::Idle) && response.drag_stopped() {
+        es.drag_idx = DRAG_NONE;
     }
 
-    ui.memory_mut(|m| m.data.insert_temp(drag_id, drag_idx));
+    // --- Modal editing (G = Grab, S = Scale) ---
+    let has_focus = response.has_focus();
+    match es.mode.clone() {
+        BezierEditMode::Idle => {
+            if has_focus && es.selected_idx >= 0 {
+                if ui.input(|i| i.key_pressed(egui::Key::G)) {
+                    let mouse_pos = ui.input(|i| i.pointer.hover_pos())
+                        .unwrap_or(egui::pos2(center.x, center.y));
+                    es.mode = BezierEditMode::Grab {
+                        point_idx: es.selected_idx,
+                        original_anchors: snapshot_all(&outline.anchors),
+                        grab_origin: [mouse_pos.x, mouse_pos.y],
+                    };
+                    ui.ctx().request_repaint();
+                } else if ui.input(|i| i.key_pressed(egui::Key::S)) && es.selected_idx < 4 {
+                    let anchor_scr = to_screen(outline.anchors[es.selected_idx as usize].position);
+                    let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or(anchor_scr);
+                    let initial_dist = anchor_scr.distance(mouse_pos).max(1.0);
+                    es.mode = BezierEditMode::Scale {
+                        anchor_idx: es.selected_idx as usize,
+                        original_anchors: snapshot_all(&outline.anchors),
+                        anchor_screen_pos: [anchor_scr.x, anchor_scr.y],
+                        initial_mouse_dist: initial_dist,
+                    };
+                    ui.ctx().request_repaint();
+                } else if ui.input(|i| i.key_pressed(egui::Key::R)) {
+                    let ai = if es.selected_idx < 4 {
+                        es.selected_idx as usize
+                    } else if es.selected_idx < 8 {
+                        (es.selected_idx - 4) as usize
+                    } else {
+                        (es.selected_idx - 8) as usize
+                    };
+                    let anchor_scr = to_screen(outline.anchors[ai].position);
+                    let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or(anchor_scr);
+                    let initial_angle = (mouse_pos.y - anchor_scr.y).atan2(mouse_pos.x - anchor_scr.x);
+                    es.mode = BezierEditMode::Rotate {
+                        anchor_idx: ai,
+                        original_anchors: snapshot_all(&outline.anchors),
+                        anchor_screen_pos: [anchor_scr.x, anchor_scr.y],
+                        initial_mouse_angle: initial_angle,
+                    };
+                    ui.ctx().request_repaint();
+                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    es.selected_idx = DRAG_NONE;
+                    response.surrender_focus();
+                }
+            }
+        }
+        BezierEditMode::Grab { point_idx, original_anchors, grab_origin } => {
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                // Relative movement: delta from grab origin, applied to original position
+                let delta = from_screen(mouse_pos);
+                let origin = from_screen(egui::pos2(grab_origin[0], grab_origin[1]));
+                let dx = delta[0] - origin[0];
+                let dy = delta[1] - origin[1];
+
+                if point_idx < 4 {
+                    let i = point_idx as usize;
+                    let orig = &original_anchors[i];
+                    outline.anchors[i].position = [orig.position[0] + dx, orig.position[1] + dy];
+                } else if point_idx < 8 {
+                    let i = (point_idx - 4) as usize;
+                    let orig = &original_anchors[i];
+                    let new_hi = [orig.handle_in[0] + dx, orig.handle_in[1] + dy];
+                    outline.anchors[i].handle_in = new_hi;
+                    outline.anchors[i].enforce_collinear_from_in();
+                } else {
+                    let i = (point_idx - 8) as usize;
+                    let orig = &original_anchors[i];
+                    let new_ho = [orig.handle_out[0] + dx, orig.handle_out[1] + dy];
+                    outline.anchors[i].handle_out = new_ho;
+                    outline.anchors[i].enforce_collinear_from_out();
+                }
+            }
+
+            if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+                es.mode = BezierEditMode::Idle;
+                es.skip_click_select = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                restore_all(&original_anchors, &mut outline.anchors);
+                es.mode = BezierEditMode::Idle;
+            }
+            ui.ctx().request_repaint();
+        }
+        BezierEditMode::Scale { anchor_idx, original_anchors, anchor_screen_pos, initial_mouse_dist } => {
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                let anchor_scr = egui::pos2(anchor_screen_pos[0], anchor_screen_pos[1]);
+                let current_dist = anchor_scr.distance(mouse_pos).max(1.0);
+                let scale_factor = current_dist / initial_mouse_dist;
+
+                let orig = &original_anchors[anchor_idx];
+                outline.anchors[anchor_idx].handle_in = [
+                    orig.handle_in[0] * scale_factor,
+                    orig.handle_in[1] * scale_factor,
+                ];
+                outline.anchors[anchor_idx].handle_out = [
+                    orig.handle_out[0] * scale_factor,
+                    orig.handle_out[1] * scale_factor,
+                ];
+            }
+
+            if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+                es.mode = BezierEditMode::Idle;
+                es.skip_click_select = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                restore_all(&original_anchors, &mut outline.anchors);
+                es.mode = BezierEditMode::Idle;
+            }
+            ui.ctx().request_repaint();
+        }
+        BezierEditMode::Rotate { anchor_idx, original_anchors, anchor_screen_pos, initial_mouse_angle } => {
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                let anchor_scr = egui::pos2(anchor_screen_pos[0], anchor_screen_pos[1]);
+                let current_angle = (mouse_pos.y - anchor_scr.y).atan2(mouse_pos.x - anchor_scr.x);
+                let delta_angle = -(current_angle - initial_mouse_angle);
+                let cos_a = delta_angle.cos();
+                let sin_a = delta_angle.sin();
+
+                let orig = &original_anchors[anchor_idx];
+                outline.anchors[anchor_idx].handle_in = [
+                    orig.handle_in[0] * cos_a - orig.handle_in[1] * sin_a,
+                    orig.handle_in[0] * sin_a + orig.handle_in[1] * cos_a,
+                ];
+                outline.anchors[anchor_idx].handle_out = [
+                    orig.handle_out[0] * cos_a - orig.handle_out[1] * sin_a,
+                    orig.handle_out[0] * sin_a + orig.handle_out[1] * cos_a,
+                ];
+            }
+
+            if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+                es.mode = BezierEditMode::Idle;
+                es.skip_click_select = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                restore_all(&original_anchors, &mut outline.anchors);
+                es.mode = BezierEditMode::Idle;
+            }
+            ui.ctx().request_repaint();
+        }
+    }
+
+    ui.memory_mut(|m| m.data.insert_temp(state_id, es));
 }
 
 // ============================================================
@@ -703,7 +1002,7 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
     let size = available_width.min(300.0);
     let (response, painter) = ui.allocate_painter(
         egui::vec2(size, size),
-        egui::Sense::click_and_drag(),
+        egui::Sense::click_and_drag() | egui::Sense::FOCUSABLE,
     );
     let rect = response.rect;
 
@@ -738,16 +1037,16 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
         }
     };
 
-    // --- Drag state ---
-    let drag_id = response.id.with(editor_id).with("drag");
-    let mut drag_idx: i32 = ui.memory(|m| m.data.get_temp(drag_id)).unwrap_or(DRAG_NONE);
+    // --- Editor state ---
+    let state_id = response.id.with(editor_id).with("editor_state");
+    let mut es: BezierEditorState =
+        ui.memory(|m| m.data.get_temp(state_id)).unwrap_or_default();
 
     // Find hovered element (for visual feedback)
     let hover_threshold = 12.0f32;
     let mut hovered_idx: i32 = DRAG_NONE;
-    if drag_idx == DRAG_NONE {
+    if es.drag_idx == DRAG_NONE && matches!(es.mode, BezierEditMode::Idle) {
         if let Some(pos) = response.hover_pos() {
-            // First pass: anchors and handles (higher priority)
             let mut best_dist = hover_threshold;
             for i in 0..4 {
                 let a = &outline.anchors[i];
@@ -822,6 +1121,7 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
     let handle_hover = egui::Color32::from_rgb(255, 220, 100);
     let anchor_color = egui::Color32::WHITE;
     let anchor_hover = egui::Color32::from_rgb(255, 255, 180);
+    let select_ring_color = egui::Color32::from_rgb(100, 180, 255);
 
     for i in 0..4 {
         let a = &anchors[i];
@@ -832,66 +1132,138 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
 
         painter.line_segment([hi_scr, ho_scr], egui::Stroke::new(1.0, handle_line_color));
 
-        let hi_active = hovered_idx == 4 + i as i32 || drag_idx == 4 + i as i32;
-        let ho_active = hovered_idx == 8 + i as i32 || drag_idx == 8 + i as i32;
+        let hi_active = hovered_idx == 4 + i as i32 || es.drag_idx == 4 + i as i32 || es.selected_idx == 4 + i as i32;
+        let ho_active = hovered_idx == 8 + i as i32 || es.drag_idx == 8 + i as i32 || es.selected_idx == 8 + i as i32;
         painter.circle_filled(hi_scr, if hi_active { 5.0 } else { 3.5 }, if hi_active { handle_hover } else { handle_color });
         painter.circle_filled(ho_scr, if ho_active { 5.0 } else { 3.5 }, if ho_active { handle_hover } else { handle_color });
+
+        if es.selected_idx == 4 + i as i32 {
+            painter.circle_stroke(hi_scr, 7.0, egui::Stroke::new(1.5, select_ring_color));
+        }
+        if es.selected_idx == 8 + i as i32 {
+            painter.circle_stroke(ho_scr, 7.0, egui::Stroke::new(1.5, select_ring_color));
+        }
     }
 
     for i in 0..4 {
         let a_scr = to_screen(anchors[i].position);
-        let active = hovered_idx == i as i32 || drag_idx == i as i32;
+        let active = hovered_idx == i as i32 || es.drag_idx == i as i32 || es.selected_idx == i as i32;
         painter.circle_filled(a_scr, if active { 7.0 } else { 5.0 }, if active { anchor_hover } else { anchor_color });
+
+        if es.selected_idx == i as i32 {
+            painter.circle_stroke(a_scr, 9.0, egui::Stroke::new(1.5, select_ring_color));
+        }
     }
 
-    // --- Drag interaction ---
-    if response.drag_started() {
+    // --- Mode indicator text ---
+    match &es.mode {
+        BezierEditMode::Grab { .. } => {
+            painter.text(
+                egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                "Grab (click=confirm, Esc=cancel)",
+                egui::FontId::proportional(11.0),
+                select_ring_color,
+            );
+        }
+        BezierEditMode::Scale { .. } => {
+            painter.text(
+                egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                "Scale (click=confirm, Esc=cancel)",
+                egui::FontId::proportional(11.0),
+                select_ring_color,
+            );
+        }
+        BezierEditMode::Rotate { .. } => {
+            painter.text(
+                egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                "Rotate (click=confirm, Esc=cancel)",
+                egui::FontId::proportional(11.0),
+                select_ring_color,
+            );
+        }
+        BezierEditMode::Idle => {}
+    }
+
+    // --- Click-to-select (only in Idle mode) ---
+    if matches!(es.mode, BezierEditMode::Idle) && response.clicked() {
+        if es.skip_click_select {
+            es.skip_click_select = false;
+        } else if let Some(pos) = response.interact_pointer_pos() {
+            let threshold = 15.0f32;
+            let mut best_dist = threshold;
+            let mut new_selected = DRAG_NONE;
+            for i in 0..4 {
+                let a = &outline.anchors[i];
+                let d = pos.distance(to_screen(a.position));
+                if d < best_dist {
+                    best_dist = d;
+                    new_selected = i as i32;
+                }
+                let hi = extend_handle(a.position, a.handle_in);
+                let d = pos.distance(to_screen(hi));
+                if d < best_dist {
+                    best_dist = d;
+                    new_selected = 4 + i as i32;
+                }
+                let ho = extend_handle(a.position, a.handle_out);
+                let d = pos.distance(to_screen(ho));
+                if d < best_dist {
+                    best_dist = d;
+                    new_selected = 8 + i as i32;
+                }
+            }
+            es.selected_idx = new_selected;
+            if es.selected_idx >= 0 {
+                response.request_focus();
+            }
+        }
+    }
+
+    // --- Drag interaction (only in Idle mode) ---
+    if matches!(es.mode, BezierEditMode::Idle) && response.drag_started() {
         if let Some(pos) = response.interact_pointer_pos() {
             let threshold = 15.0f32;
             let mut best_dist = threshold;
-            drag_idx = DRAG_NONE;
+            es.drag_idx = DRAG_NONE;
 
-            // Check anchors and handles first (higher priority)
             for i in 0..4 {
-                let a = &anchors[i];
+                let a = &outline.anchors[i];
 
                 let d = pos.distance(to_screen(a.position));
                 if d < best_dist {
                     best_dist = d;
-                    drag_idx = i as i32;
+                    es.drag_idx = i as i32;
                 }
 
                 let hi = extend_handle(a.position, a.handle_in);
                 let d = pos.distance(to_screen(hi));
                 if d < best_dist {
                     best_dist = d;
-                    drag_idx = 4 + i as i32;
+                    es.drag_idx = 4 + i as i32;
                 }
 
                 let ho = extend_handle(a.position, a.handle_out);
                 let d = pos.distance(to_screen(ho));
                 if d < best_dist {
                     best_dist = d;
-                    drag_idx = 8 + i as i32;
+                    es.drag_idx = 8 + i as i32;
                 }
             }
-
         }
     }
 
-    if response.dragged() && drag_idx >= 0 {
+    if matches!(es.mode, BezierEditMode::Idle) && response.dragged() && es.drag_idx >= 0 {
         if let Some(pos) = response.interact_pointer_pos() {
             let p = from_screen(pos);
 
-            if drag_idx < 4 {
-                let i = drag_idx as usize;
+            if es.drag_idx < 4 {
+                let i = es.drag_idx as usize;
                 outline.anchors[i].position = p;
-                // Tips (Left=0, Right=2): keep handles as-is for stable thickness
-                if i == 1 || i == 3 {
-                    outline.auto_adjust_handle_at(i);
-                }
-            } else if drag_idx < 8 {
-                let i = (drag_idx - 4) as usize;
+            } else if es.drag_idx < 8 {
+                let i = (es.drag_idx - 4) as usize;
                 let anchor = outline.anchors[i].position;
                 let new_hi = [p[0] - anchor[0], p[1] - anchor[1]];
                 // Tips (Left=0, Right=2): preserve handle length, change angle only
@@ -905,7 +1277,7 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
                 }
                 outline.anchors[i].enforce_collinear_from_in();
             } else {
-                let i = (drag_idx - 8) as usize;
+                let i = (es.drag_idx - 8) as usize;
                 let anchor = outline.anchors[i].position;
                 let new_ho = [p[0] - anchor[0], p[1] - anchor[1]];
                 // Tips (Left=0, Right=2): preserve handle length, change angle only
@@ -922,11 +1294,171 @@ fn eyebrow_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor
         }
     }
 
-    if response.drag_stopped() {
-        drag_idx = DRAG_NONE;
+    if matches!(es.mode, BezierEditMode::Idle) && response.drag_stopped() {
+        es.drag_idx = DRAG_NONE;
     }
 
-    ui.memory_mut(|m| m.data.insert_temp(drag_id, drag_idx));
+    // --- Modal editing (G = Grab, S = Scale) ---
+    let has_focus = response.has_focus();
+    match es.mode.clone() {
+        BezierEditMode::Idle => {
+            if has_focus && es.selected_idx >= 0 {
+                if ui.input(|i| i.key_pressed(egui::Key::G)) {
+                    let mouse_pos = ui.input(|i| i.pointer.hover_pos())
+                        .unwrap_or(egui::pos2(center.x, center.y));
+                    es.mode = BezierEditMode::Grab {
+                        point_idx: es.selected_idx,
+                        original_anchors: snapshot_all(&outline.anchors),
+                        grab_origin: [mouse_pos.x, mouse_pos.y],
+                    };
+                    ui.ctx().request_repaint();
+                } else if ui.input(|i| i.key_pressed(egui::Key::S)) && es.selected_idx < 4 {
+                    let anchor_scr = to_screen(outline.anchors[es.selected_idx as usize].position);
+                    let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or(anchor_scr);
+                    let initial_dist = anchor_scr.distance(mouse_pos).max(1.0);
+                    es.mode = BezierEditMode::Scale {
+                        anchor_idx: es.selected_idx as usize,
+                        original_anchors: snapshot_all(&outline.anchors),
+                        anchor_screen_pos: [anchor_scr.x, anchor_scr.y],
+                        initial_mouse_dist: initial_dist,
+                    };
+                    ui.ctx().request_repaint();
+                } else if ui.input(|i| i.key_pressed(egui::Key::R)) {
+                    let ai = if es.selected_idx < 4 {
+                        es.selected_idx as usize
+                    } else if es.selected_idx < 8 {
+                        (es.selected_idx - 4) as usize
+                    } else {
+                        (es.selected_idx - 8) as usize
+                    };
+                    let anchor_scr = to_screen(outline.anchors[ai].position);
+                    let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or(anchor_scr);
+                    let initial_angle = (mouse_pos.y - anchor_scr.y).atan2(mouse_pos.x - anchor_scr.x);
+                    es.mode = BezierEditMode::Rotate {
+                        anchor_idx: ai,
+                        original_anchors: snapshot_all(&outline.anchors),
+                        anchor_screen_pos: [anchor_scr.x, anchor_scr.y],
+                        initial_mouse_angle: initial_angle,
+                    };
+                    ui.ctx().request_repaint();
+                } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                    es.selected_idx = DRAG_NONE;
+                    response.surrender_focus();
+                }
+            }
+        }
+        BezierEditMode::Grab { point_idx, original_anchors, grab_origin } => {
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                // Relative movement: delta from grab origin, applied to original position
+                let delta = from_screen(mouse_pos);
+                let origin = from_screen(egui::pos2(grab_origin[0], grab_origin[1]));
+                let dx = delta[0] - origin[0];
+                let dy = delta[1] - origin[1];
+
+                if point_idx < 4 {
+                    let i = point_idx as usize;
+                    let orig = &original_anchors[i];
+                    outline.anchors[i].position = [orig.position[0] + dx, orig.position[1] + dy];
+                } else if point_idx < 8 {
+                    let i = (point_idx - 4) as usize;
+                    let orig = &original_anchors[i];
+                    let new_hi = [orig.handle_in[0] + dx, orig.handle_in[1] + dy];
+                    // Tips (Left=0, Right=2): preserve handle length, change angle only
+                    if i == 0 || i == 2 {
+                        let old_len = (orig.handle_in[0].powi(2) + orig.handle_in[1].powi(2)).sqrt();
+                        let new_len = (new_hi[0].powi(2) + new_hi[1].powi(2)).sqrt().max(1e-6);
+                        let s = old_len / new_len;
+                        outline.anchors[i].handle_in = [new_hi[0] * s, new_hi[1] * s];
+                    } else {
+                        outline.anchors[i].handle_in = new_hi;
+                    }
+                    outline.anchors[i].enforce_collinear_from_in();
+                } else {
+                    let i = (point_idx - 8) as usize;
+                    let orig = &original_anchors[i];
+                    let new_ho = [orig.handle_out[0] + dx, orig.handle_out[1] + dy];
+                    // Tips (Left=0, Right=2): preserve handle length, change angle only
+                    if i == 0 || i == 2 {
+                        let old_len = (orig.handle_out[0].powi(2) + orig.handle_out[1].powi(2)).sqrt();
+                        let new_len = (new_ho[0].powi(2) + new_ho[1].powi(2)).sqrt().max(1e-6);
+                        let s = old_len / new_len;
+                        outline.anchors[i].handle_out = [new_ho[0] * s, new_ho[1] * s];
+                    } else {
+                        outline.anchors[i].handle_out = new_ho;
+                    }
+                    outline.anchors[i].enforce_collinear_from_out();
+                }
+            }
+
+            if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+                es.mode = BezierEditMode::Idle;
+                es.skip_click_select = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                restore_all(&original_anchors, &mut outline.anchors);
+                es.mode = BezierEditMode::Idle;
+            }
+            ui.ctx().request_repaint();
+        }
+        BezierEditMode::Scale { anchor_idx, original_anchors, anchor_screen_pos, initial_mouse_dist } => {
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                let anchor_scr = egui::pos2(anchor_screen_pos[0], anchor_screen_pos[1]);
+                let current_dist = anchor_scr.distance(mouse_pos).max(1.0);
+                let scale_factor = current_dist / initial_mouse_dist;
+
+                let orig = &original_anchors[anchor_idx];
+                outline.anchors[anchor_idx].handle_in = [
+                    orig.handle_in[0] * scale_factor,
+                    orig.handle_in[1] * scale_factor,
+                ];
+                outline.anchors[anchor_idx].handle_out = [
+                    orig.handle_out[0] * scale_factor,
+                    orig.handle_out[1] * scale_factor,
+                ];
+            }
+
+            if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+                es.mode = BezierEditMode::Idle;
+                es.skip_click_select = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                restore_all(&original_anchors, &mut outline.anchors);
+                es.mode = BezierEditMode::Idle;
+            }
+            ui.ctx().request_repaint();
+        }
+        BezierEditMode::Rotate { anchor_idx, original_anchors, anchor_screen_pos, initial_mouse_angle } => {
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                let anchor_scr = egui::pos2(anchor_screen_pos[0], anchor_screen_pos[1]);
+                let current_angle = (mouse_pos.y - anchor_scr.y).atan2(mouse_pos.x - anchor_scr.x);
+                let delta_angle = -(current_angle - initial_mouse_angle);
+                let cos_a = delta_angle.cos();
+                let sin_a = delta_angle.sin();
+
+                let orig = &original_anchors[anchor_idx];
+                outline.anchors[anchor_idx].handle_in = [
+                    orig.handle_in[0] * cos_a - orig.handle_in[1] * sin_a,
+                    orig.handle_in[0] * sin_a + orig.handle_in[1] * cos_a,
+                ];
+                outline.anchors[anchor_idx].handle_out = [
+                    orig.handle_out[0] * cos_a - orig.handle_out[1] * sin_a,
+                    orig.handle_out[0] * sin_a + orig.handle_out[1] * cos_a,
+                ];
+            }
+
+            if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+                es.mode = BezierEditMode::Idle;
+                es.skip_click_select = true;
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                restore_all(&original_anchors, &mut outline.anchors);
+                es.mode = BezierEditMode::Idle;
+            }
+            ui.ctx().request_repaint();
+        }
+    }
+
+    ui.memory_mut(|m| m.data.insert_temp(state_id, es));
 }
 
 fn format_eyebrow_shape(shape: &EyebrowShape) -> String {
