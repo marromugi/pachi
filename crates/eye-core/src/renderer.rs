@@ -103,7 +103,7 @@ impl Default for EyeUniforms {
 
             // Bezier outline
             outline_open: BezierOutline::ellipse(0.28, 0.35).to_uniform_array(),
-            outline_closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20).to_uniform_array(),
+            outline_closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20, -0.015).to_uniform_array(),
 
             // Eyebrow
             eyebrow_color: [0.009, 0.009, 0.035],

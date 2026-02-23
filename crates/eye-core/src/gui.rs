@@ -81,6 +81,14 @@ pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_sh
                 .default_open(true)
                 .show(ui, |ui| {
                     bezier_outline_editor(ui, &mut eye_shape.open, "eye_shape");
+                    let old_arch = eye_shape.close_arch;
+                    ui.add(
+                        egui::Slider::new(&mut eye_shape.close_arch, -0.06..=0.06)
+                            .text("Close Arch"),
+                    );
+                    if (eye_shape.close_arch - old_arch).abs() > 1e-6 {
+                        eye_shape.update_closed();
+                    }
                     if ui.button("Reset Ellipse").clicked() {
                         eye_shape.open = BezierOutline::ellipse(0.28, 0.35);
                     }

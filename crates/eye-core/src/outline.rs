@@ -162,15 +162,17 @@ impl BezierOutline {
         }
     }
 
-    /// Create a closed-eye slit with asymmetric eyelid movement.
+    /// Create a closed-eye slit with configurable arch direction.
     ///
-    /// The upper lid (Top anchor) drops well below the Left/Right corners
-    /// to form a reverse arch, while the lower lid (Bottom anchor) barely
-    /// moves upward. The shader's linear `mix()` between open and closed
-    /// states naturally produces: arch → flat → reverse arch on the upper lid.
-    pub fn closed_slit_asymmetric(half_width: f32, y_slit: f32) -> Self {
+    /// `arch` controls how far the upper lid curves away from the slit corners:
+    ///   - Negative values: reverse arch (upper lid dips below corners, default look)
+    ///   - Positive values: smile arch (upper lid curves above corners, happy look)
+    ///   - Zero: flat slit
+    ///
+    /// The shader's linear `mix()` between open and closed states naturally
+    /// produces smooth transitions through the arch shape.
+    pub fn closed_slit_asymmetric(half_width: f32, y_slit: f32, arch: f32) -> Self {
         let tiny = 0.005;
-        let reverse_h = 0.015; // how far upper lid dips below slit corners
         let hw = half_width * KAPPA;
 
         Self {
@@ -181,9 +183,9 @@ impl BezierOutline {
                     handle_in: [0.0, -tiny],
                     handle_out: [0.0, tiny],
                 },
-                // Top (upper lid) — dips BELOW slit level for reverse arch
+                // Top (upper lid) — arch direction controlled by `arch` parameter
                 BezierAnchor {
-                    position: [0.0, y_slit - reverse_h],
+                    position: [0.0, y_slit + arch],
                     handle_in: [-hw, 0.0],
                     handle_out: [hw, 0.0],
                 },
@@ -195,7 +197,7 @@ impl BezierOutline {
                 },
                 // Bottom (lower lid) — just below Top to avoid crossing
                 BezierAnchor {
-                    position: [0.0, y_slit - reverse_h - tiny],
+                    position: [0.0, y_slit + arch - tiny],
                     handle_in: [hw, 0.0],
                     handle_out: [-hw, 0.0],
                 },
@@ -294,13 +296,25 @@ impl BezierOutline {
 pub struct EyeShape {
     pub open: BezierOutline,
     pub closed: BezierOutline,
+    /// Controls the arch direction when the eye is closed.
+    /// Negative = reverse arch (default), positive = smile arch.
+    pub close_arch: f32,
+}
+
+impl EyeShape {
+    /// Regenerate the closed outline from the current `close_arch` value.
+    pub fn update_closed(&mut self) {
+        self.closed = BezierOutline::closed_slit_asymmetric(0.20, -0.20, self.close_arch);
+    }
 }
 
 impl Default for EyeShape {
     fn default() -> Self {
+        let close_arch = -0.015;
         Self {
             open: BezierOutline::ellipse(0.28, 0.35),
-            closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20),
+            closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20, close_arch),
+            close_arch,
         }
     }
 }
