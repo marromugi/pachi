@@ -3,197 +3,483 @@ use egui;
 use crate::outline::{BezierOutline, EyelashShape, EyeShape, EyebrowShape};
 use crate::EyeUniforms;
 
-pub fn eye_control_panel(ctx: &egui::Context, uniforms: &mut EyeUniforms, eye_shape: &mut EyeShape, eyebrow_shape: &mut EyebrowShape, eyelash_shape: &mut EyelashShape, auto_blink: &mut bool, follow_mouse: &mut bool, show_highlight: &mut bool, show_eyebrow: &mut bool, show_eyelash: &mut bool, focus_distance: &mut f32) {
+// ============================================================
+// Per-eye data types
+// ============================================================
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Side {
+    Left,
+    Right,
+}
+
+/// Per-section link state: whether left/right eyes share the same parameters.
+#[derive(Clone, Debug)]
+pub struct SectionLink {
+    pub linked: bool,
+    /// Which eye is being edited when unlinked.
+    pub active: Side,
+}
+
+impl Default for SectionLink {
+    fn default() -> Self {
+        Self {
+            linked: true,
+            active: Side::Left,
+        }
+    }
+}
+
+/// All parameters for one eye.
+#[derive(Clone, Debug)]
+pub struct EyeSideState {
+    pub uniforms: EyeUniforms,
+    pub eye_shape: EyeShape,
+    pub eyebrow_shape: EyebrowShape,
+    pub eyelash_shape: EyelashShape,
+}
+
+impl Default for EyeSideState {
+    fn default() -> Self {
+        Self {
+            uniforms: EyeUniforms::default(),
+            eye_shape: EyeShape::default(),
+            eyebrow_shape: EyebrowShape::default(),
+            eyelash_shape: EyelashShape::default(),
+        }
+    }
+}
+
+// ============================================================
+// Section sync helpers
+// ============================================================
+
+fn sync_shape(from: &EyeSideState, to: &mut EyeSideState) {
+    to.uniforms.eyelid_close = from.uniforms.eyelid_close;
+    to.eye_shape = from.eye_shape.clone();
+}
+
+fn sync_iris(from: &EyeSideState, to: &mut EyeSideState) {
+    to.uniforms.iris_color = from.uniforms.iris_color;
+    to.uniforms.iris_radius = from.uniforms.iris_radius;
+    to.uniforms.iris_follow = from.uniforms.iris_follow;
+    to.uniforms.look_x = from.uniforms.look_x;
+    to.uniforms.look_y = from.uniforms.look_y;
+    to.uniforms.pupil_color = from.uniforms.pupil_color;
+    to.uniforms.pupil_radius = from.uniforms.pupil_radius;
+}
+
+fn sync_eyebrow(from: &EyeSideState, to: &mut EyeSideState) {
+    to.eyebrow_shape = from.eyebrow_shape.clone();
+}
+
+fn sync_eyelash(from: &EyeSideState, to: &mut EyeSideState) {
+    to.eyelash_shape = from.eyelash_shape.clone();
+}
+
+/// Apply a section sync based on which side was active before re-linking.
+fn apply_relink(
+    from_side: Side,
+    left: &mut EyeSideState,
+    right: &mut EyeSideState,
+    sync_fn: fn(&EyeSideState, &mut EyeSideState),
+) {
+    match from_side {
+        Side::Left => sync_fn(&*left, right),
+        Side::Right => sync_fn(&*right, left),
+    }
+}
+
+// ============================================================
+// Eye selector UI (Both / L / R)
+// ============================================================
+
+/// Renders the Both/L/R selector for a section.
+/// Returns `Some(side)` if re-linked (transition from unlinked → linked),
+/// indicating which side's values should be copied to the other.
+fn section_eye_selector(ui: &mut egui::Ui, link: &mut SectionLink) -> Option<Side> {
+    let mut relink_from = None;
+    ui.horizontal(|ui| {
+        if ui.selectable_label(link.linked, "Both").clicked() && !link.linked {
+            relink_from = Some(link.active);
+            link.linked = true;
+        }
+        if ui
+            .selectable_label(!link.linked && link.active == Side::Left, "L")
+            .clicked()
+        {
+            link.linked = false;
+            link.active = Side::Left;
+        }
+        if ui
+            .selectable_label(!link.linked && link.active == Side::Right, "R")
+            .clicked()
+        {
+            link.linked = false;
+            link.active = Side::Right;
+        }
+    });
+    relink_from
+}
+
+// ============================================================
+// Main control panel
+// ============================================================
+
+#[allow(clippy::too_many_arguments)]
+pub fn eye_control_panel(
+    ctx: &egui::Context,
+    left: &mut EyeSideState,
+    right: &mut EyeSideState,
+    link_shape: &mut SectionLink,
+    link_iris: &mut SectionLink,
+    link_eyebrow: &mut SectionLink,
+    link_eyelash: &mut SectionLink,
+    auto_blink: &mut bool,
+    follow_mouse: &mut bool,
+    show_highlight: &mut bool,
+    show_eyebrow: &mut bool,
+    show_eyelash: &mut bool,
+    focus_distance: &mut f32,
+) {
     egui::SidePanel::right("eye_controls")
         .default_width(280.0)
         .show(ctx, |ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading("Eye Controls");
-            ui.separator();
+                ui.heading("Eye Controls");
+                ui.separator();
 
-            ui.add_enabled(
-                !*auto_blink,
-                egui::Slider::new(&mut uniforms.eyelid_close, 0.0..=1.0).text("Eyelid Close"),
-            );
-            ui.checkbox(auto_blink, "Auto Blink");
-
-            ui.separator();
-
-            egui::CollapsingHeader::new("3D Perspective")
-                .default_open(true)
-                .show(ui, |ui| {
-                    ui.checkbox(follow_mouse, "Follow Mouse");
+                // --- Eyelid Close (linked to shape section) ---
+                {
+                    let editing_left = link_shape.linked || link_shape.active == Side::Left;
+                    let eyelid = if editing_left {
+                        &mut left.uniforms.eyelid_close
+                    } else {
+                        &mut right.uniforms.eyelid_close
+                    };
+                    let label = if link_shape.linked {
+                        "Eyelid Close"
+                    } else if link_shape.active == Side::Left {
+                        "Eyelid Close [L]"
+                    } else {
+                        "Eyelid Close [R]"
+                    };
                     ui.add_enabled(
-                        !*follow_mouse,
-                        egui::Slider::new(&mut uniforms.look_x, -1.0..=1.0).text("Look X"),
+                        !*auto_blink,
+                        egui::Slider::new(eyelid, 0.0..=1.0).text(label),
                     );
-                    ui.add_enabled(
-                        !*follow_mouse,
-                        egui::Slider::new(&mut uniforms.look_y, -1.0..=1.0).text("Look Y"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut uniforms.max_angle, 0.0..=1.5)
-                            .text("Max Angle"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut uniforms.eye_angle, 0.05..=1.2)
-                            .text("Eye Angle"),
-                    );
-                    ui.add(
-                        egui::Slider::new(focus_distance, 0.5..=20.0)
-                            .text("Focus Distance")
-                            .logarithmic(true),
-                    );
-                });
-
-            ui.separator();
-
-            egui::CollapsingHeader::new("Iris")
-                .default_open(true)
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label("Iris Color");
-                        color_edit_rgb(ui, &mut uniforms.iris_color);
-                    });
-                    ui.add(
-                        egui::Slider::new(&mut uniforms.iris_radius, 0.02..=0.25)
-                            .text("Iris Radius"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut uniforms.iris_follow, 0.0..=0.20)
-                            .text("Iris Follow"),
-                    );
-                    ui.separator();
-                    ui.label("Pupil");
-                    ui.horizontal(|ui| {
-                        ui.label("Pupil Color");
-                        color_edit_rgb(ui, &mut uniforms.pupil_color);
-                    });
-                    ui.add(
-                        egui::Slider::new(&mut uniforms.pupil_radius, 0.01..=0.20)
-                            .text("Pupil Radius"),
-                    );
-                });
-
-            ui.separator();
-
-            egui::CollapsingHeader::new("Eye Shape")
-                .default_open(true)
-                .show(ui, |ui| {
-                    bezier_outline_editor(ui, &mut eye_shape.open, "eye_shape");
-                    let old_arch = eye_shape.close_arch;
-                    ui.add(
-                        egui::Slider::new(&mut eye_shape.close_arch, -0.06..=0.06)
-                            .text("Close Arch"),
-                    );
-                    if (eye_shape.close_arch - old_arch).abs() > 1e-6 {
-                        eye_shape.update_closed();
+                    if link_shape.linked {
+                        right.uniforms.eyelid_close = left.uniforms.eyelid_close;
                     }
-                    if ui.button("Reset Ellipse").clicked() {
-                        eye_shape.open = BezierOutline::ellipse(0.28, 0.35);
-                    }
-                });
+                }
+                ui.checkbox(auto_blink, "Auto Blink");
 
-            ui.separator();
+                ui.separator();
 
-            egui::CollapsingHeader::new("Eyebrow")
-                .default_open(true)
-                .show(ui, |ui| {
-                    ui.checkbox(show_eyebrow, "Show Eyebrow");
-                    ui.horizontal(|ui| {
-                        ui.label("Color");
-                        color_edit_rgb(ui, &mut eyebrow_shape.color);
-                    });
-                    ui.add(
-                        egui::Slider::new(&mut eyebrow_shape.base_y, 0.30..=0.70)
-                            .text("Base Y"),
-                    );
-                    ui.add(
-                        egui::Slider::new(&mut eyebrow_shape.follow, 0.0..=0.40)
-                            .text("Follow Rate"),
-                    );
-                    eyebrow_outline_editor(ui, &mut eyebrow_shape.outline, "eyebrow_shape");
-                    // Tip thickness sliders (Left=0, Right=2)
-                    for &(idx, label) in &[(0usize, "Tip L"), (2usize, "Tip R")] {
-                        let a = &eyebrow_shape.outline.anchors[idx];
-                        let len_in = (a.handle_in[0].powi(2) + a.handle_in[1].powi(2)).sqrt();
-                        let len_out = (a.handle_out[0].powi(2) + a.handle_out[1].powi(2)).sqrt();
-                        let mut thickness = len_in.max(len_out);
-                        let old = thickness;
+                // --- 3D Perspective (always global, except look_x/look_y follow iris link) ---
+                egui::CollapsingHeader::new("3D Perspective")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        ui.checkbox(follow_mouse, "Follow Mouse");
+
+                        // Look X/Y follow iris link state
+                        {
+                            let editing_left =
+                                link_iris.linked || link_iris.active == Side::Left;
+                            let look_uniforms = if editing_left {
+                                &mut left.uniforms
+                            } else {
+                                &mut right.uniforms
+                            };
+                            let suffix = if link_iris.linked {
+                                ""
+                            } else if link_iris.active == Side::Left {
+                                " [L]"
+                            } else {
+                                " [R]"
+                            };
+                            ui.add_enabled(
+                                !*follow_mouse,
+                                egui::Slider::new(&mut look_uniforms.look_x, -1.0..=1.0)
+                                    .text(format!("Look X{suffix}")),
+                            );
+                            ui.add_enabled(
+                                !*follow_mouse,
+                                egui::Slider::new(&mut look_uniforms.look_y, -1.0..=1.0)
+                                    .text(format!("Look Y{suffix}")),
+                            );
+                            if link_iris.linked {
+                                right.uniforms.look_x = left.uniforms.look_x;
+                                right.uniforms.look_y = left.uniforms.look_y;
+                            }
+                        }
+
+                        // Global params (always edit left, sync to right)
                         ui.add(
-                            egui::Slider::new(&mut thickness, 0.001..=0.15)
-                                .text(label),
+                            egui::Slider::new(&mut left.uniforms.max_angle, 0.0..=1.5)
+                                .text("Max Angle"),
                         );
-                        if (thickness - old).abs() > 1e-6 {
-                            let s = thickness / old.max(0.001);
-                            eyebrow_shape.outline.anchors[idx].handle_in[0] *= s;
-                            eyebrow_shape.outline.anchors[idx].handle_in[1] *= s;
-                            eyebrow_shape.outline.anchors[idx].handle_out[0] *= s;
-                            eyebrow_shape.outline.anchors[idx].handle_out[1] *= s;
+                        right.uniforms.max_angle = left.uniforms.max_angle;
+
+                        ui.add(
+                            egui::Slider::new(&mut left.uniforms.eye_angle, 0.05..=1.2)
+                                .text("Eye Angle"),
+                        );
+                        right.uniforms.eye_angle = left.uniforms.eye_angle;
+
+                        ui.add(
+                            egui::Slider::new(focus_distance, 0.5..=20.0)
+                                .text("Focus Distance")
+                                .logarithmic(true),
+                        );
+                    });
+
+                ui.separator();
+
+                // --- Iris / Pupil ---
+                egui::CollapsingHeader::new("Iris")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        if let Some(from) = section_eye_selector(ui, link_iris) {
+                            apply_relink(from, left, right, sync_iris);
                         }
-                    }
-                    ui.horizontal(|ui| {
-                        if ui.button("Reset Eyebrow").clicked() {
-                            *eyebrow_shape = EyebrowShape::default();
+
+                        let editing_left = link_iris.linked || link_iris.active == Side::Left;
+                        let u = if editing_left {
+                            &mut left.uniforms
+                        } else {
+                            &mut right.uniforms
+                        };
+
+                        ui.horizontal(|ui| {
+                            ui.label("Iris Color");
+                            color_edit_rgb(ui, &mut u.iris_color);
+                        });
+                        ui.add(
+                            egui::Slider::new(&mut u.iris_radius, 0.02..=0.25)
+                                .text("Iris Radius"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut u.iris_follow, 0.0..=0.20)
+                                .text("Iris Follow"),
+                        );
+                        ui.separator();
+                        ui.label("Pupil");
+                        ui.horizontal(|ui| {
+                            ui.label("Pupil Color");
+                            color_edit_rgb(ui, &mut u.pupil_color);
+                        });
+                        ui.add(
+                            egui::Slider::new(&mut u.pupil_radius, 0.01..=0.20)
+                                .text("Pupil Radius"),
+                        );
+
+                        // Sync linked fields
+                        if link_iris.linked {
+                            sync_iris(&*left, right);
                         }
-                        if ui.button("Copy").clicked() {
-                            let s = format_eyebrow_shape(eyebrow_shape);
-                            ui.ctx().copy_text(s);
+                    });
+
+                ui.separator();
+
+                // --- Eye Shape ---
+                egui::CollapsingHeader::new("Eye Shape")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        if let Some(from) = section_eye_selector(ui, link_shape) {
+                            apply_relink(from, left, right, sync_shape);
+                        }
+
+                        let editing_left = link_shape.linked || link_shape.active == Side::Left;
+                        let eye_shape = if editing_left {
+                            &mut left.eye_shape
+                        } else {
+                            &mut right.eye_shape
+                        };
+                        let side_suffix = if link_shape.linked {
+                            ""
+                        } else if link_shape.active == Side::Left {
+                            "_left"
+                        } else {
+                            "_right"
+                        };
+                        let editor_id = format!("eye_shape{side_suffix}");
+                        bezier_outline_editor(ui, &mut eye_shape.open, &editor_id);
+                        let old_arch = eye_shape.close_arch;
+                        ui.add(
+                            egui::Slider::new(&mut eye_shape.close_arch, -0.06..=0.06)
+                                .text("Close Arch"),
+                        );
+                        if (eye_shape.close_arch - old_arch).abs() > 1e-6 {
+                            eye_shape.update_closed();
+                        }
+                        if ui.button("Reset Ellipse").clicked() {
+                            eye_shape.open = BezierOutline::ellipse(0.28, 0.35);
+                        }
+
+                        // Sync linked fields
+                        if link_shape.linked {
+                            sync_shape(&*left, right);
                         }
                     });
-                });
 
-            ui.separator();
+                ui.separator();
 
-            egui::CollapsingHeader::new("Eyelash")
-                .default_open(true)
-                .show(ui, |ui| {
-                    ui.checkbox(show_eyelash, "Show Eyelash");
-                    ui.horizontal(|ui| {
-                        ui.label("Color");
-                        color_edit_rgb(ui, &mut eyelash_shape.color);
+                // --- Eyebrow ---
+                egui::CollapsingHeader::new("Eyebrow")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        if let Some(from) = section_eye_selector(ui, link_eyebrow) {
+                            apply_relink(from, left, right, sync_eyebrow);
+                        }
+
+                        ui.checkbox(show_eyebrow, "Show Eyebrow");
+
+                        let editing_left =
+                            link_eyebrow.linked || link_eyebrow.active == Side::Left;
+                        let eyebrow_shape = if editing_left {
+                            &mut left.eyebrow_shape
+                        } else {
+                            &mut right.eyebrow_shape
+                        };
+                        let side_suffix = if link_eyebrow.linked {
+                            ""
+                        } else if link_eyebrow.active == Side::Left {
+                            "_left"
+                        } else {
+                            "_right"
+                        };
+
+                        ui.horizontal(|ui| {
+                            ui.label("Color");
+                            color_edit_rgb(ui, &mut eyebrow_shape.color);
+                        });
+                        ui.add(
+                            egui::Slider::new(&mut eyebrow_shape.base_y, 0.30..=0.70)
+                                .text("Base Y"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut eyebrow_shape.follow, 0.0..=0.40)
+                                .text("Follow Rate"),
+                        );
+                        let editor_id = format!("eyebrow_shape{side_suffix}");
+                        eyebrow_outline_editor(ui, &mut eyebrow_shape.outline, &editor_id);
+                        // Tip thickness sliders (Left=0, Right=2)
+                        for &(idx, label) in &[(0usize, "Tip L"), (2usize, "Tip R")] {
+                            let a = &eyebrow_shape.outline.anchors[idx];
+                            let len_in =
+                                (a.handle_in[0].powi(2) + a.handle_in[1].powi(2)).sqrt();
+                            let len_out =
+                                (a.handle_out[0].powi(2) + a.handle_out[1].powi(2)).sqrt();
+                            let mut thickness = len_in.max(len_out);
+                            let old = thickness;
+                            ui.add(
+                                egui::Slider::new(&mut thickness, 0.001..=0.15).text(label),
+                            );
+                            if (thickness - old).abs() > 1e-6 {
+                                let s = thickness / old.max(0.001);
+                                eyebrow_shape.outline.anchors[idx].handle_in[0] *= s;
+                                eyebrow_shape.outline.anchors[idx].handle_in[1] *= s;
+                                eyebrow_shape.outline.anchors[idx].handle_out[0] *= s;
+                                eyebrow_shape.outline.anchors[idx].handle_out[1] *= s;
+                            }
+                        }
+                        ui.horizontal(|ui| {
+                            if ui.button("Reset Eyebrow").clicked() {
+                                *eyebrow_shape = EyebrowShape::default();
+                            }
+                            if ui.button("Copy").clicked() {
+                                let s = format_eyebrow_shape(eyebrow_shape);
+                                ui.ctx().copy_text(s);
+                            }
+                        });
+
+                        // Sync linked fields
+                        if link_eyebrow.linked {
+                            sync_eyebrow(&*left, right);
+                        }
                     });
-                    ui.add(
-                        egui::Slider::new(&mut eyelash_shape.thickness, 0.005..=0.06)
-                            .text("Thickness"),
-                    );
-                    if ui.button("Reset Eyelash").clicked() {
-                        *eyelash_shape = EyelashShape::default();
-                    }
-                });
 
-            ui.separator();
+                ui.separator();
 
-            egui::CollapsingHeader::new("Appearance")
-                .default_open(false)
-                .show(ui, |ui| {
-                    ui.checkbox(show_highlight, "Highlight");
-                    ui.add(
-                        egui::Slider::new(&mut uniforms.eye_separation, 0.2..=1.2)
-                            .text("Eye Separation"),
-                    );
-                    ui.horizontal(|ui| {
-                        ui.label("BG Color");
-                        color_edit_rgb(ui, &mut uniforms.bg_color);
+                // --- Eyelash ---
+                egui::CollapsingHeader::new("Eyelash")
+                    .default_open(true)
+                    .show(ui, |ui| {
+                        if let Some(from) = section_eye_selector(ui, link_eyelash) {
+                            apply_relink(from, left, right, sync_eyelash);
+                        }
+
+                        ui.checkbox(show_eyelash, "Show Eyelash");
+
+                        let editing_left =
+                            link_eyelash.linked || link_eyelash.active == Side::Left;
+                        let eyelash_shape = if editing_left {
+                            &mut left.eyelash_shape
+                        } else {
+                            &mut right.eyelash_shape
+                        };
+
+                        ui.horizontal(|ui| {
+                            ui.label("Color");
+                            color_edit_rgb(ui, &mut eyelash_shape.color);
+                        });
+                        ui.add(
+                            egui::Slider::new(&mut eyelash_shape.thickness, 0.005..=0.06)
+                                .text("Thickness"),
+                        );
+                        if ui.button("Reset Eyelash").clicked() {
+                            *eyelash_shape = EyelashShape::default();
+                        }
+
+                        // Sync linked fields
+                        if link_eyelash.linked {
+                            sync_eyelash(&*left, right);
+                        }
                     });
-                    ui.horizontal(|ui| {
-                        ui.label("Sclera Color");
-                        color_edit_rgb(ui, &mut uniforms.sclera_color);
+
+                ui.separator();
+
+                // --- Appearance (always global) ---
+                egui::CollapsingHeader::new("Appearance")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.checkbox(show_highlight, "Highlight");
+                        ui.add(
+                            egui::Slider::new(&mut left.uniforms.eye_separation, 0.2..=1.2)
+                                .text("Eye Separation"),
+                        );
+                        right.uniforms.eye_separation = left.uniforms.eye_separation;
+
+                        ui.horizontal(|ui| {
+                            ui.label("BG Color");
+                            color_edit_rgb(ui, &mut left.uniforms.bg_color);
+                        });
+                        right.uniforms.bg_color = left.uniforms.bg_color;
+
+                        ui.horizontal(|ui| {
+                            ui.label("Sclera Color");
+                            color_edit_rgb(ui, &mut left.uniforms.sclera_color);
+                        });
+                        right.uniforms.sclera_color = left.uniforms.sclera_color;
                     });
-                });
 
-            ui.separator();
+                ui.separator();
 
-            if ui.button("Reset All").clicked() {
-                let aspect = uniforms.aspect_ratio;
-                let time = uniforms.time;
-                *uniforms = EyeUniforms::default();
-                uniforms.aspect_ratio = aspect;
-                uniforms.time = time;
-                *eye_shape = EyeShape::default();
-                *eyebrow_shape = EyebrowShape::default();
-                *eyelash_shape = EyelashShape::default();
-            }
+                if ui.button("Reset All").clicked() {
+                    let aspect = left.uniforms.aspect_ratio;
+                    let time = left.uniforms.time;
+                    *left = EyeSideState::default();
+                    *right = EyeSideState::default();
+                    left.uniforms.aspect_ratio = aspect;
+                    left.uniforms.time = time;
+                    right.uniforms.aspect_ratio = aspect;
+                    right.uniforms.time = time;
+                    *link_shape = SectionLink::default();
+                    *link_iris = SectionLink::default();
+                    *link_eyebrow = SectionLink::default();
+                    *link_eyelash = SectionLink::default();
+                }
             });
         });
 }
@@ -652,7 +938,7 @@ fn format_eyebrow_shape(shape: &EyebrowShape) -> String {
     let labels = ["Left", "Top", "Right", "Bottom"];
     for (i, a) in shape.outline.anchors.iter().enumerate() {
         s.push_str(&format!("            // {}\n", labels[i]));
-        s.push_str(&format!("            BezierAnchor {{\n"));
+        s.push_str("            BezierAnchor {\n");
         s.push_str(&format!("                position: [{:.6}, {:.6}],\n", a.position[0], a.position[1]));
         s.push_str(&format!("                handle_in: [{:.6}, {:.6}],\n", a.handle_in[0], a.handle_in[1]));
         s.push_str(&format!("                handle_out: [{:.6}, {:.6}],\n", a.handle_out[0], a.handle_out[1]));

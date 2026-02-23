@@ -69,6 +69,20 @@ pub struct EyeUniforms {
 
 const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 560);
 
+/// Paired uniform structure: one set per eye.
+/// The shader reads `pair.left` for the left eye and `pair.right` for the right eye.
+/// Global parameters (bg_color, aspect_ratio, eye_separation, etc.) are read
+/// from `left`; the Rust side keeps them in sync.
+#[repr(C)]
+#[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]
+pub struct EyePairUniforms {
+    pub left: EyeUniforms,
+    pub right: EyeUniforms,
+}
+// Total: 1120 bytes (= 560 * 2)
+
+const _: () = assert!(std::mem::size_of::<EyePairUniforms>() == 1120);
+
 impl Default for EyeUniforms {
     fn default() -> Self {
         Self {
@@ -153,7 +167,7 @@ impl EyeRenderer {
 
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("eye_uniform_buffer"),
-            size: std::mem::size_of::<EyeUniforms>() as u64,
+            size: std::mem::size_of::<EyePairUniforms>() as u64,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -226,7 +240,7 @@ impl EyeRenderer {
         encoder: &mut wgpu::CommandEncoder,
         target: &wgpu::TextureView,
         queue: &wgpu::Queue,
-        params: &EyeUniforms,
+        params: &EyePairUniforms,
     ) {
         queue.write_buffer(&self.uniform_buffer, 0, bytemuck::bytes_of(params));
 

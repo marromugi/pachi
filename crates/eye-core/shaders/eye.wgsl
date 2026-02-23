@@ -1,7 +1,7 @@
 // ============================================================
 // Eye SDF Shader
-// Renders two eyes (left mirrored from right) using cubic
-// Bezier outline for eye shape.
+// Renders two eyes with independent per-eye parameters using
+// cubic Bezier outline for eye shape.
 // ============================================================
 
 struct Uniforms {
@@ -61,8 +61,16 @@ struct Uniforms {
     pupil_radius: f32,
 }
 
+struct EyePair {
+    left: Uniforms,
+    right: Uniforms,
+}
+
 @group(0) @binding(0)
-var<uniform> u: Uniforms;
+var<uniform> pair: EyePair;
+
+// Active eye parameters — set to pair.left or pair.right before rendering each eye.
+var<private> u: Uniforms;
 
 struct VertexOutput {
     @builtin(position) clip_position: vec4f,
@@ -370,23 +378,26 @@ fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32) -> vec4f {
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4f {
+    // Scene-level parameters from left (Rust side keeps global params in sync)
+    let g = pair.left;
+
     let p = vec2f(
-        (in.uv.x * 2.0 - 1.0) * u.aspect_ratio,
+        (in.uv.x * 2.0 - 1.0) * g.aspect_ratio,
         -(in.uv.y * 2.0 - 1.0)
     );
 
-    var color = u.bg_color;
+    var color = g.bg_color;
 
     // --- Sphere projection model ---
     // Eyes are decals on a virtual sphere. Rotation causes foreshortening.
-    let yaw   = u.look_x * u.max_angle;
-    let pitch = u.look_y * u.max_angle * u.aspect_ratio * 0.65;
+    let yaw   = g.look_x * g.max_angle;
+    let pitch = g.look_y * g.max_angle * g.aspect_ratio * 0.65;
 
     // Angular half-separation of eyes on the sphere
-    let half_sep = clamp(u.eye_angle, 0.01, 1.5);
+    let half_sep = clamp(g.eye_angle, 0.01, 1.5);
 
     // Sphere radius: at yaw=0, eye_separation/2 = R * sin(half_sep)
-    let R = u.eye_separation * 0.5 / sin(half_sep);
+    let R = g.eye_separation * 0.5 / sin(half_sep);
 
     // Per-eye horizontal angle from viewer center
     let left_h  = -half_sep + yaw;
@@ -415,6 +426,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     const BBOX_FADE: f32 = 0.10;
 
     if left_h_scale <= right_h_scale {
+        u = pair.left;
         let left_p = p - left_center;
         let left_lx = abs(left_p.x) / left_h_scale;
         let left_ly = abs(left_p.y) / v_scale;
@@ -429,6 +441,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
             color = mix(color, left_lash.xyz, left_lash.w * fade);
         }
 
+        u = pair.right;
         let right_p = p - right_center;
         let right_lx = abs(right_p.x) / right_h_scale;
         let right_ly = abs(right_p.y) / v_scale;
@@ -443,6 +456,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
             color = mix(color, right_lash.xyz, right_lash.w * fade);
         }
     } else {
+        u = pair.right;
         let right_p = p - right_center;
         let right_lx = abs(right_p.x) / right_h_scale;
         let right_ly = abs(right_p.y) / v_scale;
@@ -457,6 +471,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
             color = mix(color, right_lash.xyz, right_lash.w * fade);
         }
 
+        u = pair.left;
         let left_p = p - left_center;
         let left_lx = abs(left_p.x) / left_h_scale;
         let left_ly = abs(left_p.y) / v_scale;
