@@ -69,9 +69,21 @@ pub struct BezierAnchorConfig {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct EyebrowShapeConfig {
     pub outline: EyebrowOutlineConfig,
+    #[serde(default = "default_eyebrow_thickness")]
+    pub thickness: [f32; 3],
+    #[serde(default = "default_tip_round")]
+    pub tip_round: [bool; 2],
     pub base_y: f32,
     pub follow: f32,
     pub color: [f32; 3],
+}
+
+fn default_eyebrow_thickness() -> [f32; 3] {
+    [0.004, 0.031, 0.004]
+}
+
+fn default_tip_round() -> [bool; 2] {
+    [true, true]
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -217,6 +229,8 @@ impl From<&EyebrowShape> for EyebrowShapeConfig {
     fn from(s: &EyebrowShape) -> Self {
         Self {
             outline: EyebrowOutlineConfig::from(&s.outline),
+            thickness: s.thickness,
+            tip_round: s.tip_round,
             base_y: s.base_y,
             follow: s.follow,
             color: s.color,
@@ -231,6 +245,8 @@ impl From<&EyebrowShapeConfig> for EyebrowShape {
         Self {
             outline,
             guide,
+            thickness: c.thickness,
+            tip_round: c.tip_round,
             base_y: c.base_y,
             follow: c.follow,
             color: c.color,

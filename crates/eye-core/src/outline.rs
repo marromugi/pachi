@@ -451,6 +451,127 @@ impl EyebrowOutline {
             self.auto_adjust_handle_at(i);
         }
     }
+
+    /// Generate an eyebrow outline from a guide spine and per-point thickness.
+    ///
+    /// `thickness[i]` controls the thickness at guide point `i` (G0, G1, G2).
+    /// For each guide anchor, the tangent direction is computed and used to offset
+    /// the top/bottom edges by ±thickness[i]/2 along the normal.
+    pub fn from_guide_and_thickness(guide: &EyebrowGuide, thickness: [f32; 3], tip_round: [bool; 2]) -> Self {
+        let th = [thickness[0] * 0.5, thickness[1] * 0.5, thickness[2] * 0.5];
+
+        // Compute tangent direction at each guide point
+        let tangent_at = |i: usize| -> [f32; 2] {
+            let g = &guide.anchors;
+            match i {
+                0 => {
+                    [g[1].position[0] - g[0].position[0], g[1].position[1] - g[0].position[1]]
+                }
+                1 => {
+                    let ho = g[1].handle_out;
+                    let hi = g[1].handle_in;
+                    if ho[0].abs() > 1e-8 || ho[1].abs() > 1e-8 {
+                        ho
+                    } else if hi[0].abs() > 1e-8 || hi[1].abs() > 1e-8 {
+                        [-hi[0], -hi[1]]
+                    } else {
+                        [g[2].position[0] - g[0].position[0], g[2].position[1] - g[0].position[1]]
+                    }
+                }
+                _ => {
+                    [g[2].position[0] - g[1].position[0], g[2].position[1] - g[1].position[1]]
+                }
+            }
+        };
+
+        // Compute unit normal (perpendicular to tangent, pointing "up")
+        let normal_at = |i: usize| -> [f32; 2] {
+            let t = tangent_at(i);
+            let len = (t[0] * t[0] + t[1] * t[1]).sqrt();
+            if len < 1e-8 {
+                return [0.0, 1.0];
+            }
+            [-t[1] / len, t[0] / len]
+        };
+
+        let n0 = normal_at(0);
+        let n1 = normal_at(1);
+        let n2 = normal_at(2);
+
+        let g = &guide.anchors;
+
+        // Cap handle scale per endpoint (proportional to each tip's thickness)
+        let cap_h0 = if tip_round[0] { th[0] * KAPPA } else { 0.0 };
+        let cap_h2 = if tip_round[1] { th[2] * KAPPA } else { 0.0 };
+
+        // Tangent directions at endpoints (normalized) for cap handles
+        let t0_dir = tangent_at(0);
+        let t0_len = (t0_dir[0] * t0_dir[0] + t0_dir[1] * t0_dir[1]).sqrt();
+        let t0_norm = if t0_len > 1e-8 { [t0_dir[0] / t0_len, t0_dir[1] / t0_len] } else { [1.0, 0.0] };
+
+        let t2_dir = tangent_at(2);
+        let t2_len = (t2_dir[0] * t2_dir[0] + t2_dir[1] * t2_dir[1]).sqrt();
+        let t2_norm = if t2_len > 1e-8 { [t2_dir[0] / t2_len, t2_dir[1] / t2_len] } else { [1.0, 0.0] };
+
+        Self {
+            anchors: [
+                // T0: left tip (top edge) - paired with G0
+                BezierAnchor {
+                    position: [
+                        g[0].position[0] + n0[0] * th[0],
+                        g[0].position[1] + n0[1] * th[0],
+                    ],
+                    handle_in: [-t0_norm[0] * cap_h0, -t0_norm[1] * cap_h0],
+                    handle_out: g[0].handle_out,
+                },
+                // T1: top center - paired with G1
+                BezierAnchor {
+                    position: [
+                        g[1].position[0] + n1[0] * th[1],
+                        g[1].position[1] + n1[1] * th[1],
+                    ],
+                    handle_in: g[1].handle_in,
+                    handle_out: g[1].handle_out,
+                },
+                // T2: right tip (top edge) - paired with G2
+                BezierAnchor {
+                    position: [
+                        g[2].position[0] + n2[0] * th[2],
+                        g[2].position[1] + n2[1] * th[2],
+                    ],
+                    handle_in: g[2].handle_in,
+                    handle_out: [t2_norm[0] * cap_h2, t2_norm[1] * cap_h2],
+                },
+                // B0: right tip (bottom edge) - paired with G2
+                BezierAnchor {
+                    position: [
+                        g[2].position[0] - n2[0] * th[2],
+                        g[2].position[1] - n2[1] * th[2],
+                    ],
+                    handle_in: [t2_norm[0] * cap_h2, t2_norm[1] * cap_h2],
+                    handle_out: g[2].handle_in,
+                },
+                // B1: bottom center - paired with G1
+                BezierAnchor {
+                    position: [
+                        g[1].position[0] - n1[0] * th[1],
+                        g[1].position[1] - n1[1] * th[1],
+                    ],
+                    handle_in: g[1].handle_out,
+                    handle_out: g[1].handle_in,
+                },
+                // B2: left tip (bottom edge) - paired with G0
+                BezierAnchor {
+                    position: [
+                        g[0].position[0] - n0[0] * th[0],
+                        g[0].position[1] - n0[1] * th[0],
+                    ],
+                    handle_in: g[0].handle_out,
+                    handle_out: [-t0_norm[0] * cap_h0, -t0_norm[1] * cap_h0],
+                },
+            ],
+        }
+    }
 }
 
 /// 3-point guide bezier for eyebrow center spine (GUI-only, not sent to GPU).
@@ -515,10 +636,15 @@ impl EyebrowGuide {
 /// Uses a 6-anchor EyebrowOutline with a 3-point guide spine.
 #[derive(Clone, Debug)]
 pub struct EyebrowShape {
-    /// The eyebrow outline (6-anchor closed path).
+    /// The eyebrow outline (6-anchor closed path, auto-generated from guide + thickness).
     pub outline: EyebrowOutline,
     /// Guide curve for intuitive editing (3-anchor open path, GUI only).
     pub guide: EyebrowGuide,
+    /// Per-point thickness of the eyebrow in eye-space units [G0, G1, G2].
+    pub thickness: [f32; 3],
+    /// Whether each tip is rounded (true) or angular/pointed (false).
+    /// Index 0 = left tip (G0), index 1 = right tip (G2).
+    pub tip_round: [bool; 2],
     /// Base Y offset above the eye center (in eye-space units).
     pub base_y: f32,
     /// How much the eyebrow follows eyelid closure.
@@ -530,54 +656,47 @@ pub struct EyebrowShape {
 
 impl Default for EyebrowShape {
     fn default() -> Self {
-        let outline = EyebrowOutline {
+        let thickness = [0.004, 0.031, 0.004];
+        let guide = EyebrowGuide {
             anchors: [
-                // T0: left tip (top edge)
+                // G0: left tip
                 BezierAnchor {
-                    position: [-0.276688, 0.006054],
-                    handle_in: [0.001793, -0.000075],
-                    handle_out: [0.060000, 0.015000],
+                    position: [-0.276688, 0.004054],
+                    handle_in: [0.0, 0.0],
+                    handle_out: [0.0, 0.0],
                 },
-                // T1: top center
+                // G1: center
                 BezierAnchor {
-                    position: [-0.020307, 0.082777],
-                    handle_in: [-0.148111, -0.001620],
-                    handle_out: [0.165870, 0.001814],
+                    position: [-0.018345, 0.067402],
+                    handle_in: [-0.153147, -0.000617],
+                    handle_out: [0.162907, 0.001100],
                 },
-                // T2: right tip (top edge)
+                // G2: right tip
                 BezierAnchor {
-                    position: [0.268674, 0.002915],
-                    handle_in: [-0.060000, 0.015000],
-                    handle_out: [-0.002503, -0.006593],
-                },
-                // B0: right tip (bottom edge)
-                BezierAnchor {
-                    position: [0.268674, -0.001085],
-                    handle_in: [0.000676, 0.006593],
-                    handle_out: [-0.060000, -0.012000],
-                },
-                // B1: bottom center
-                BezierAnchor {
-                    position: [-0.016383, 0.052027],
-                    handle_in: [0.159943, 0.000386],
-                    handle_out: [-0.146183, -0.000353],
-                },
-                // B2: left tip (bottom edge)
-                BezierAnchor {
-                    position: [-0.276688, 0.002054],
-                    handle_in: [0.060000, -0.012000],
-                    handle_out: [-0.001793, 0.000075],
+                    position: [0.268674, 0.000915],
+                    handle_in: [0.0, 0.0],
+                    handle_out: [0.0, 0.0],
                 },
             ],
         };
-        let guide = EyebrowGuide::from_outline(&outline);
+        let tip_round = [true, true];
+        let outline = EyebrowOutline::from_guide_and_thickness(&guide, thickness, tip_round);
         Self {
             outline,
             guide,
+            thickness,
+            tip_round,
             base_y: 0.48,
             follow: 0.15,
             color: [0.0090, 0.0090, 0.0350],
         }
+    }
+}
+
+impl EyebrowShape {
+    /// Rebuild the outline from the current guide and thickness.
+    pub fn rebuild_outline(&mut self) {
+        self.outline = EyebrowOutline::from_guide_and_thickness(&self.guide, self.thickness, self.tip_round);
     }
 }
 
