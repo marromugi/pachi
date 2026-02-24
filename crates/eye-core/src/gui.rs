@@ -10,6 +10,7 @@ use crate::EyeUniforms;
 #[derive(Debug, Default)]
 pub struct GuiActions {
     pub export_requested: bool,
+    pub import_requested: bool,
 }
 
 // ============================================================
@@ -547,9 +548,14 @@ pub fn eye_control_panel(
                     *link_eyelash = SectionLink::default();
                 }
 
-                if ui.button("Export JSON").clicked() {
-                    actions.export_requested = true;
-                }
+                ui.horizontal(|ui| {
+                    if ui.button("Export JSON").clicked() {
+                        actions.export_requested = true;
+                    }
+                    if ui.button("Import JSON").clicked() {
+                        actions.import_requested = true;
+                    }
+                });
             });
         });
     actions

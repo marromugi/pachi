@@ -11,6 +11,7 @@ use winit::window::{Window, WindowId};
 
 struct App {
     state: Option<AppState>,
+    config_path: Option<String>,
 }
 
 struct AppState {
@@ -64,7 +65,7 @@ impl ApplicationHandler for App {
                 .unwrap(),
         );
 
-        let state = pollster::block_on(async {
+        let mut state = pollster::block_on(async {
             let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
                 backends: wgpu::Backends::all(),
                 ..Default::default()
@@ -150,6 +151,32 @@ impl ApplicationHandler for App {
                 egui_renderer,
             }
         });
+
+        // Apply config from command-line argument if provided
+        if let Some(path) = &self.config_path {
+            match std::fs::read_to_string(path) {
+                Ok(json) => match EyeConfig::from_json(&json) {
+                    Ok(config) => {
+                        config.apply_to_state(
+                            &mut state.left,
+                            &mut state.right,
+                            &mut state.link_shape,
+                            &mut state.link_iris,
+                            &mut state.link_eyebrow,
+                            &mut state.link_eyelash,
+                            &mut state.auto_blink,
+                            &mut state.follow_mouse,
+                            &mut state.show_highlight,
+                            &mut state.show_eyebrow,
+                            &mut state.show_eyelash,
+                            &mut state.focus_distance,
+                        );
+                    }
+                    Err(e) => eprintln!("Invalid config JSON: {e}"),
+                },
+                Err(e) => eprintln!("Failed to read config file: {e}"),
+            }
+        }
 
         self.state = Some(state);
     }
@@ -383,6 +410,37 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                if gui_actions.import_requested {
+                    let file = rfd::FileDialog::new()
+                        .set_title("Import Eye Config")
+                        .add_filter("JSON", &["json"])
+                        .pick_file();
+                    if let Some(path) = file {
+                        match std::fs::read_to_string(&path) {
+                            Ok(json) => match EyeConfig::from_json(&json) {
+                                Ok(config) => {
+                                    config.apply_to_state(
+                                        &mut state.left,
+                                        &mut state.right,
+                                        &mut state.link_shape,
+                                        &mut state.link_iris,
+                                        &mut state.link_eyebrow,
+                                        &mut state.link_eyelash,
+                                        &mut state.auto_blink,
+                                        &mut state.follow_mouse,
+                                        &mut state.show_highlight,
+                                        &mut state.show_eyebrow,
+                                        &mut state.show_eyelash,
+                                        &mut state.focus_distance,
+                                    );
+                                }
+                                Err(e) => eprintln!("Invalid config JSON: {e}"),
+                            },
+                            Err(e) => eprintln!("Failed to read config file: {e}"),
+                        }
+                    }
+                }
+
                 state
                     .egui_state
                     .handle_platform_output(&state.window, full_output.platform_output);
@@ -505,7 +563,12 @@ impl ApplicationHandler for App {
 fn main() {
     env_logger::init();
 
+    let config_path = std::env::args().nth(1);
+
     let event_loop = EventLoop::new().unwrap();
-    let mut app = App { state: None };
+    let mut app = App {
+        state: None,
+        config_path,
+    };
     event_loop.run_app(&mut app).unwrap();
 }
