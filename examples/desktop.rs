@@ -1,8 +1,8 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use eye::gui::{eye_control_panel, EyeSideState, SectionLink};
-use eye::{BlinkAnimation, EyePairUniforms, EyeRenderer};
+use eye::gui::{eye_control_panel, EyeSideState, GuiActions, SectionLink};
+use eye::{BlinkAnimation, EyeConfig, EyePairUniforms, EyeRenderer};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -332,9 +332,10 @@ impl ApplicationHandler for App {
                 // --- egui frame ---
                 let raw_input = state.egui_state.take_egui_input(&state.window);
                 let show_sidebar = state.show_sidebar;
+                let mut gui_actions = GuiActions::default();
                 let full_output = state.egui_ctx.run(raw_input, |ctx| {
                     if show_sidebar {
-                        eye_control_panel(
+                        gui_actions = eye_control_panel(
                             ctx,
                             &mut state.left,
                             &mut state.right,
@@ -351,6 +352,36 @@ impl ApplicationHandler for App {
                         );
                     }
                 });
+
+                // Handle GUI actions
+                if gui_actions.export_requested {
+                    let config = EyeConfig::from_state(
+                        &state.left,
+                        &state.right,
+                        &state.link_shape,
+                        &state.link_iris,
+                        &state.link_eyebrow,
+                        &state.link_eyelash,
+                        state.auto_blink,
+                        state.follow_mouse,
+                        state.show_highlight,
+                        state.show_eyebrow,
+                        state.show_eyelash,
+                        state.focus_distance,
+                    );
+                    if let Ok(json) = config.to_json() {
+                        let file = rfd::FileDialog::new()
+                            .set_title("Export Eye Config")
+                            .add_filter("JSON", &["json"])
+                            .set_file_name("eye_config.json")
+                            .save_file();
+                        if let Some(path) = file {
+                            if let Err(e) = std::fs::write(&path, &json) {
+                                eprintln!("Failed to write config: {e}");
+                            }
+                        }
+                    }
+                }
 
                 state
                     .egui_state
