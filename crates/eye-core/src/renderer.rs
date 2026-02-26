@@ -38,7 +38,8 @@ pub struct EyeUniforms {
     pub iris_color: [f32; 3],        // offset 80  | vec3f - iris color
     pub iris_radius: f32,            // offset 92  | iris circle radius
     pub iris_follow: f32,            // offset 96  | gaze follow scale
-    pub _pad_iris: [f32; 3],         // offset 100 | padding to 16-byte boundary
+    pub iris_offset_y: f32,          // offset 100 | static vertical offset (negative = down)
+    pub _pad_iris: [f32; 2],         // offset 104 | padding to 16-byte boundary
 
     // -- Bezier outline open -- (128 bytes, offset 112)
     // 4 segments x 2 vec4f each. Each vec4f packs 2 vec2f control points.
@@ -120,7 +121,8 @@ impl Default for EyeUniforms {
             iris_color: [0.112, 0.126, 0.214],
             iris_radius: 0.15,
             iris_follow: 0.14,
-            _pad_iris: [0.0, 0.0, 0.0],
+            iris_offset_y: -0.02,
+            _pad_iris: [0.0, 0.0],
 
             // Bezier outline
             outline_open: BezierOutline::ellipse(0.28, 0.35).to_uniform_array(),

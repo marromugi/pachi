@@ -77,6 +77,7 @@ fn sync_iris(from: &EyeSideState, to: &mut EyeSideState) {
     to.uniforms.iris_color = from.uniforms.iris_color;
     to.uniforms.iris_radius = from.uniforms.iris_radius;
     to.uniforms.iris_follow = from.uniforms.iris_follow;
+    to.uniforms.iris_offset_y = from.uniforms.iris_offset_y;
     to.uniforms.look_x = from.uniforms.look_x;
     to.uniforms.look_y = from.uniforms.look_y;
     to.uniforms.pupil_color = from.uniforms.pupil_color;
@@ -280,6 +281,10 @@ pub fn eye_control_panel(
                         ui.add(
                             egui::Slider::new(&mut u.iris_follow, 0.0..=0.20)
                                 .text("Iris Follow"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut u.iris_offset_y, -0.10..=0.10)
+                                .text("Iris Offset Y"),
                         );
                         ui.separator();
                         ui.label("Pupil");

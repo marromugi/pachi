@@ -32,7 +32,7 @@ struct Uniforms {
     iris_color: vec3f,
     iris_radius: f32,
     iris_follow: f32,
-    _pad_iris_a: f32,
+    iris_offset_y: f32,
     _pad_iris_b: f32,
     _pad_iris_c: f32,
 
@@ -429,7 +429,7 @@ fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32, rest_h_scale: f
     // --- Iris (follows gaze) ---
     let iris_offset = vec2f(
         mirror * u.look_x * u.iris_follow + u.convergence,
-        u.look_y * u.iris_follow
+        u.look_y * u.iris_follow + u.iris_offset_y
     );
     let iris_p = sq_p - iris_offset;
     // Correct iris/pupil query coords: multiply x by rest_h_scale to cancel

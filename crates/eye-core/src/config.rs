@@ -32,6 +32,8 @@ pub struct EyeSideConfig {
     pub eyelid_close: f32,
     pub iris_radius: f32,
     pub iris_follow: f32,
+    #[serde(default = "default_iris_offset_y")]
+    pub iris_offset_y: f32,
     pub pupil_radius: f32,
     pub highlight_offset: [f32; 2],
     pub highlight_radius: f32,
@@ -76,6 +78,10 @@ pub struct EyebrowShapeConfig {
     pub base_y: f32,
     pub follow: f32,
     pub color: [f32; 3],
+}
+
+fn default_iris_offset_y() -> f32 {
+    -0.02
 }
 
 fn default_eyebrow_thickness() -> [f32; 3] {
@@ -325,6 +331,7 @@ impl From<&EyeSideState> for EyeSideConfig {
             eyelid_close: s.uniforms.eyelid_close,
             iris_radius: s.uniforms.iris_radius,
             iris_follow: s.uniforms.iris_follow,
+            iris_offset_y: s.uniforms.iris_offset_y,
             pupil_radius: s.uniforms.pupil_radius,
             highlight_offset: s.uniforms.highlight_offset,
             highlight_radius: s.uniforms.highlight_radius,
@@ -349,6 +356,7 @@ impl EyeSideConfig {
         s.uniforms.eyelid_close = self.eyelid_close;
         s.uniforms.iris_radius = self.iris_radius;
         s.uniforms.iris_follow = self.iris_follow;
+        s.uniforms.iris_offset_y = self.iris_offset_y;
         s.uniforms.pupil_radius = self.pupil_radius;
         s.uniforms.highlight_offset = self.highlight_offset;
         s.uniforms.highlight_radius = self.highlight_radius;
