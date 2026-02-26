@@ -92,6 +92,42 @@ impl BezierOutline {
         }
     }
 
+    /// Create a thin eyebrow arc shape, centered at origin.
+    /// `half_width` is the horizontal half-extent.
+    /// `thickness` is the vertical half-extent (how thick the brow is).
+    pub fn eyebrow_arc(half_width: f32, thickness: f32) -> Self {
+        let hw = half_width * KAPPA;
+        let ht = thickness * KAPPA;
+        Self {
+            anchors: [
+                // Left tip (-half_width, 0): tapers to a point
+                BezierAnchor {
+                    position: [-half_width, 0.0],
+                    handle_in: [0.0, -ht * 0.3],
+                    handle_out: [0.0, ht * 0.3],
+                },
+                // Top center (0, +thickness): upper arc
+                BezierAnchor {
+                    position: [0.0, thickness],
+                    handle_in: [-hw, 0.0],
+                    handle_out: [hw, 0.0],
+                },
+                // Right tip (+half_width, 0): tapers to a point
+                BezierAnchor {
+                    position: [half_width, 0.0],
+                    handle_in: [0.0, ht * 0.3],
+                    handle_out: [0.0, -ht * 0.3],
+                },
+                // Bottom center (0, -thickness): lower arc
+                BezierAnchor {
+                    position: [0.0, -thickness],
+                    handle_in: [hw, 0.0],
+                    handle_out: [-hw, 0.0],
+                },
+            ],
+        }
+    }
+
     /// Create a closed-eye slit shape (nearly flat horizontal line).
     pub fn closed_slit(half_width: f32, y_pos: f32) -> Self {
         let tiny = 0.005;
@@ -126,15 +162,17 @@ impl BezierOutline {
         }
     }
 
-    /// Create a closed-eye slit with asymmetric eyelid movement.
+    /// Create a closed-eye slit with configurable arch direction.
     ///
-    /// The upper lid (Top anchor) drops well below the Left/Right corners
-    /// to form a reverse arch, while the lower lid (Bottom anchor) barely
-    /// moves upward. The shader's linear `mix()` between open and closed
-    /// states naturally produces: arch → flat → reverse arch on the upper lid.
-    pub fn closed_slit_asymmetric(half_width: f32, y_slit: f32) -> Self {
+    /// `arch` controls how far the upper lid curves away from the slit corners:
+    ///   - Negative values: reverse arch (upper lid dips below corners, default look)
+    ///   - Positive values: smile arch (upper lid curves above corners, happy look)
+    ///   - Zero: flat slit
+    ///
+    /// The shader's linear `mix()` between open and closed states naturally
+    /// produces smooth transitions through the arch shape.
+    pub fn closed_slit_asymmetric(half_width: f32, y_slit: f32, arch: f32) -> Self {
         let tiny = 0.005;
-        let reverse_h = 0.015; // how far upper lid dips below slit corners
         let hw = half_width * KAPPA;
 
         Self {
@@ -145,9 +183,9 @@ impl BezierOutline {
                     handle_in: [0.0, -tiny],
                     handle_out: [0.0, tiny],
                 },
-                // Top (upper lid) — dips BELOW slit level for reverse arch
+                // Top (upper lid) — arch direction controlled by `arch` parameter
                 BezierAnchor {
-                    position: [0.0, y_slit - reverse_h],
+                    position: [0.0, y_slit + arch],
                     handle_in: [-hw, 0.0],
                     handle_out: [hw, 0.0],
                 },
@@ -159,7 +197,7 @@ impl BezierOutline {
                 },
                 // Bottom (lower lid) — just below Top to avoid crossing
                 BezierAnchor {
-                    position: [0.0, y_slit - reverse_h - tiny],
+                    position: [0.0, y_slit + arch - tiny],
                     handle_in: [hw, 0.0],
                     handle_out: [-hw, 0.0],
                 },
@@ -258,13 +296,456 @@ impl BezierOutline {
 pub struct EyeShape {
     pub open: BezierOutline,
     pub closed: BezierOutline,
+    /// Controls the arch direction when the eye is closed.
+    /// Negative = reverse arch (default), positive = smile arch.
+    pub close_arch: f32,
+}
+
+impl EyeShape {
+    /// Regenerate the closed outline from the current `close_arch` value.
+    pub fn update_closed(&mut self) {
+        self.closed = BezierOutline::closed_slit_asymmetric(0.20, -0.20, self.close_arch);
+    }
 }
 
 impl Default for EyeShape {
     fn default() -> Self {
+        let close_arch = -0.015;
         Self {
             open: BezierOutline::ellipse(0.28, 0.35),
-            closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20),
+            closed: BezierOutline::closed_slit_asymmetric(0.20, -0.20, close_arch),
+            close_arch,
+        }
+    }
+}
+
+/// Eyebrow-specific outline with 6 anchor points.
+///
+/// Points [0,1,2] = top edge (left → middle → right)
+/// Points [3,4,5] = bottom edge (right → middle → left)
+/// Closed path: 0→1→2→3→4→5→0 (6 cubic bezier segments)
+#[derive(Clone, Debug)]
+pub struct EyebrowOutline {
+    pub anchors: [BezierAnchor; 6],
+}
+
+impl EyebrowOutline {
+    /// Create a thin eyebrow arc shape with 6 anchor points.
+    pub fn eyebrow_arc(half_width: f32, thickness: f32) -> Self {
+        let hw = half_width * KAPPA;
+        let t_half = thickness * 0.5;
+        let ht = t_half * KAPPA;
+        Self {
+            anchors: [
+                // T0: left tip (top edge)
+                BezierAnchor {
+                    position: [-half_width, 0.0],
+                    handle_in: [0.0, -ht * 0.3],
+                    handle_out: [hw * 0.5, ht * 0.5],
+                },
+                // T1: top center
+                BezierAnchor {
+                    position: [0.0, t_half],
+                    handle_in: [-hw, 0.0],
+                    handle_out: [hw, 0.0],
+                },
+                // T2: right tip (top edge)
+                BezierAnchor {
+                    position: [half_width, 0.0],
+                    handle_in: [-hw * 0.5, ht * 0.5],
+                    handle_out: [0.0, -ht * 0.3],
+                },
+                // B0: right tip (bottom edge)
+                BezierAnchor {
+                    position: [half_width, 0.0],
+                    handle_in: [0.0, ht * 0.3],
+                    handle_out: [-hw * 0.5, -ht * 0.5],
+                },
+                // B1: bottom center
+                BezierAnchor {
+                    position: [0.0, -t_half],
+                    handle_in: [hw, 0.0],
+                    handle_out: [-hw, 0.0],
+                },
+                // B2: left tip (bottom edge)
+                BezierAnchor {
+                    position: [-half_width, 0.0],
+                    handle_in: [-hw * 0.5, -ht * 0.5],
+                    handle_out: [0.0, ht * 0.3],
+                },
+            ],
+        }
+    }
+
+    /// Convert to a flat array of 12 × [f32; 4] for GPU uniform upload.
+    /// 6 segments × 2 vec4f each.
+    pub fn to_uniform_array(&self) -> [[f32; 4]; 12] {
+        let mut result = [[0.0f32; 4]; 12];
+        for seg in 0..6 {
+            let next = (seg + 1) % 6;
+            let a = &self.anchors[seg];
+            let b = &self.anchors[next];
+
+            let p0 = a.position;
+            let p1 = [
+                a.position[0] + a.handle_out[0],
+                a.position[1] + a.handle_out[1],
+            ];
+            let p2 = [
+                b.position[0] + b.handle_in[0],
+                b.position[1] + b.handle_in[1],
+            ];
+            let p3 = b.position;
+
+            result[seg * 2] = [p0[0], p0[1], p1[0], p1[1]];
+            result[seg * 2 + 1] = [p2[0], p2[1], p3[0], p3[1]];
+        }
+        result
+    }
+
+    /// Auto-adjust handles for a single anchor based on its neighbors.
+    pub fn auto_adjust_handle_at(&mut self, i: usize) {
+        let n = 6;
+        let prev = (i + n - 1) % n;
+        let next = (i + 1) % n;
+
+        let to_prev = [
+            self.anchors[prev].position[0] - self.anchors[i].position[0],
+            self.anchors[prev].position[1] - self.anchors[i].position[1],
+        ];
+        let to_next = [
+            self.anchors[next].position[0] - self.anchors[i].position[0],
+            self.anchors[next].position[1] - self.anchors[i].position[1],
+        ];
+
+        let len_prev = (to_prev[0].powi(2) + to_prev[1].powi(2)).sqrt();
+        let len_next = (to_next[0].powi(2) + to_next[1].powi(2)).sqrt();
+
+        if len_prev < 1e-8 || len_next < 1e-8 {
+            return;
+        }
+
+        let dir = [
+            to_next[0] / len_next - to_prev[0] / len_prev,
+            to_next[1] / len_next - to_prev[1] / len_prev,
+        ];
+        let dir_len = (dir[0].powi(2) + dir[1].powi(2)).sqrt();
+
+        if dir_len < 1e-8 {
+            let perp = [-to_next[1] / len_next, to_next[0] / len_next];
+            self.anchors[i].handle_out = [perp[0] * len_next * KAPPA, perp[1] * len_next * KAPPA];
+            self.anchors[i].handle_in = [-perp[0] * len_prev * KAPPA, -perp[1] * len_prev * KAPPA];
+        } else {
+            let dir_norm = [dir[0] / dir_len, dir[1] / dir_len];
+            let out_len = len_next * KAPPA;
+            let in_len = len_prev * KAPPA;
+
+            self.anchors[i].handle_out = [dir_norm[0] * out_len, dir_norm[1] * out_len];
+            self.anchors[i].handle_in = [-dir_norm[0] * in_len, -dir_norm[1] * in_len];
+        }
+    }
+
+    /// Auto-adjust handles for all anchors.
+    pub fn auto_adjust_handles(&mut self) {
+        for i in 0..6 {
+            self.auto_adjust_handle_at(i);
+        }
+    }
+
+    /// Generate an eyebrow outline from a guide spine and per-point thickness.
+    ///
+    /// `thickness[i]` controls the thickness at guide point `i` (G0, G1, G2).
+    /// For each guide anchor, the tangent direction is computed and used to offset
+    /// the top/bottom edges by ±thickness[i]/2 along the normal.
+    pub fn from_guide_and_thickness(guide: &EyebrowGuide, thickness: [f32; 3], tip_round: [bool; 2]) -> Self {
+        let th = [thickness[0] * 0.5, thickness[1] * 0.5, thickness[2] * 0.5];
+
+        // Compute tangent direction at each guide point
+        let tangent_at = |i: usize| -> [f32; 2] {
+            let g = &guide.anchors;
+            match i {
+                0 => {
+                    [g[1].position[0] - g[0].position[0], g[1].position[1] - g[0].position[1]]
+                }
+                1 => {
+                    let ho = g[1].handle_out;
+                    let hi = g[1].handle_in;
+                    if ho[0].abs() > 1e-8 || ho[1].abs() > 1e-8 {
+                        ho
+                    } else if hi[0].abs() > 1e-8 || hi[1].abs() > 1e-8 {
+                        [-hi[0], -hi[1]]
+                    } else {
+                        [g[2].position[0] - g[0].position[0], g[2].position[1] - g[0].position[1]]
+                    }
+                }
+                _ => {
+                    [g[2].position[0] - g[1].position[0], g[2].position[1] - g[1].position[1]]
+                }
+            }
+        };
+
+        // Compute unit normal (perpendicular to tangent, pointing "up")
+        let normal_at = |i: usize| -> [f32; 2] {
+            let t = tangent_at(i);
+            let len = (t[0] * t[0] + t[1] * t[1]).sqrt();
+            if len < 1e-8 {
+                return [0.0, 1.0];
+            }
+            [-t[1] / len, t[0] / len]
+        };
+
+        let n0 = normal_at(0);
+        let n1 = normal_at(1);
+        let n2 = normal_at(2);
+
+        let g = &guide.anchors;
+
+        // Cap handle scale per endpoint (proportional to each tip's thickness)
+        let cap_h0 = if tip_round[0] { th[0] * KAPPA } else { 0.0 };
+        let cap_h2 = if tip_round[1] { th[2] * KAPPA } else { 0.0 };
+
+        // Tangent directions at endpoints (normalized) for cap handles
+        let t0_dir = tangent_at(0);
+        let t0_len = (t0_dir[0] * t0_dir[0] + t0_dir[1] * t0_dir[1]).sqrt();
+        let t0_norm = if t0_len > 1e-8 { [t0_dir[0] / t0_len, t0_dir[1] / t0_len] } else { [1.0, 0.0] };
+
+        let t2_dir = tangent_at(2);
+        let t2_len = (t2_dir[0] * t2_dir[0] + t2_dir[1] * t2_dir[1]).sqrt();
+        let t2_norm = if t2_len > 1e-8 { [t2_dir[0] / t2_len, t2_dir[1] / t2_len] } else { [1.0, 0.0] };
+
+        Self {
+            anchors: [
+                // T0: left tip (top edge) - paired with G0
+                BezierAnchor {
+                    position: [
+                        g[0].position[0] + n0[0] * th[0],
+                        g[0].position[1] + n0[1] * th[0],
+                    ],
+                    handle_in: [-t0_norm[0] * cap_h0, -t0_norm[1] * cap_h0],
+                    handle_out: g[0].handle_out,
+                },
+                // T1: top center - paired with G1
+                BezierAnchor {
+                    position: [
+                        g[1].position[0] + n1[0] * th[1],
+                        g[1].position[1] + n1[1] * th[1],
+                    ],
+                    handle_in: g[1].handle_in,
+                    handle_out: g[1].handle_out,
+                },
+                // T2: right tip (top edge) - paired with G2
+                BezierAnchor {
+                    position: [
+                        g[2].position[0] + n2[0] * th[2],
+                        g[2].position[1] + n2[1] * th[2],
+                    ],
+                    handle_in: g[2].handle_in,
+                    handle_out: [t2_norm[0] * cap_h2, t2_norm[1] * cap_h2],
+                },
+                // B0: right tip (bottom edge) - paired with G2
+                BezierAnchor {
+                    position: [
+                        g[2].position[0] - n2[0] * th[2],
+                        g[2].position[1] - n2[1] * th[2],
+                    ],
+                    handle_in: [t2_norm[0] * cap_h2, t2_norm[1] * cap_h2],
+                    handle_out: g[2].handle_in,
+                },
+                // B1: bottom center - paired with G1
+                BezierAnchor {
+                    position: [
+                        g[1].position[0] - n1[0] * th[1],
+                        g[1].position[1] - n1[1] * th[1],
+                    ],
+                    handle_in: g[1].handle_out,
+                    handle_out: g[1].handle_in,
+                },
+                // B2: left tip (bottom edge) - paired with G0
+                BezierAnchor {
+                    position: [
+                        g[0].position[0] - n0[0] * th[0],
+                        g[0].position[1] - n0[1] * th[0],
+                    ],
+                    handle_in: g[0].handle_out,
+                    handle_out: [-t0_norm[0] * cap_h0, -t0_norm[1] * cap_h0],
+                },
+            ],
+        }
+    }
+}
+
+/// 3-point guide bezier for eyebrow center spine (GUI-only, not sent to GPU).
+///
+/// G0 (left), G1 (middle), G2 (right) form 2 cubic bezier segments (open path).
+/// Guide-to-outline pairing:
+///   G0 ↔ outline[0] (T0) + outline[5] (B2)
+///   G1 ↔ outline[1] (T1) + outline[4] (B1)
+///   G2 ↔ outline[2] (T2) + outline[3] (B0)
+#[derive(Clone, Debug)]
+pub struct EyebrowGuide {
+    pub anchors: [BezierAnchor; 3],
+}
+
+impl EyebrowGuide {
+    /// Derive guide positions as midpoints between paired top/bottom outline anchors.
+    pub fn from_outline(outline: &EyebrowOutline) -> Self {
+        let mid = |top_idx: usize, bot_idx: usize| -> BezierAnchor {
+            let t = &outline.anchors[top_idx];
+            let b = &outline.anchors[bot_idx];
+            BezierAnchor {
+                position: [
+                    (t.position[0] + b.position[0]) * 0.5,
+                    (t.position[1] + b.position[1]) * 0.5,
+                ],
+                handle_in: [
+                    (t.handle_in[0] + b.handle_in[0]) * 0.5,
+                    (t.handle_in[1] + b.handle_in[1]) * 0.5,
+                ],
+                handle_out: [
+                    (t.handle_out[0] + b.handle_out[0]) * 0.5,
+                    (t.handle_out[1] + b.handle_out[1]) * 0.5,
+                ],
+            }
+        };
+        Self {
+            anchors: [
+                mid(0, 5), // G0: left tip
+                mid(1, 4), // G1: center
+                mid(2, 3), // G2: right tip
+            ],
+        }
+    }
+
+    /// Return the paired outline indices for guide index `gi`.
+    /// Returns (top_index, bottom_index).
+    pub fn paired_indices(gi: usize) -> (usize, usize) {
+        (gi, 5 - gi)
+    }
+
+    /// Apply a translation delta from guide point `gi` to the paired outline points.
+    pub fn propagate_delta(gi: usize, delta: [f32; 2], outline: &mut EyebrowOutline) {
+        let (top, bot) = Self::paired_indices(gi);
+        outline.anchors[top].position[0] += delta[0];
+        outline.anchors[top].position[1] += delta[1];
+        outline.anchors[bot].position[0] += delta[0];
+        outline.anchors[bot].position[1] += delta[1];
+    }
+}
+
+/// Eyebrow shape and behavior parameters.
+/// Uses a 6-anchor EyebrowOutline with a 3-point guide spine.
+#[derive(Clone, Debug)]
+pub struct EyebrowShape {
+    /// The eyebrow outline (6-anchor closed path, auto-generated from guide + thickness).
+    pub outline: EyebrowOutline,
+    /// Guide curve for intuitive editing (3-anchor open path, GUI only).
+    pub guide: EyebrowGuide,
+    /// Per-point thickness of the eyebrow in eye-space units [G0, G1, G2].
+    pub thickness: [f32; 3],
+    /// Whether each tip is rounded (true) or angular/pointed (false).
+    /// Index 0 = left tip (G0), index 1 = right tip (G2).
+    pub tip_round: [bool; 2],
+    /// Base Y offset above the eye center (in eye-space units).
+    pub base_y: f32,
+    /// How much the eyebrow follows eyelid closure.
+    /// Effective Y = base_y - eyelid_close * follow.
+    pub follow: f32,
+    /// Eyebrow fill color [R, G, B] in linear sRGB, 0..1.
+    pub color: [f32; 3],
+}
+
+impl Default for EyebrowShape {
+    fn default() -> Self {
+        let thickness = [0.004, 0.031, 0.004];
+        let guide = EyebrowGuide {
+            anchors: [
+                // G0: left tip
+                BezierAnchor {
+                    position: [-0.276688, 0.004054],
+                    handle_in: [0.0, 0.0],
+                    handle_out: [0.0, 0.0],
+                },
+                // G1: center
+                BezierAnchor {
+                    position: [-0.018345, 0.067402],
+                    handle_in: [-0.153147, -0.000617],
+                    handle_out: [0.162907, 0.001100],
+                },
+                // G2: right tip
+                BezierAnchor {
+                    position: [0.268674, 0.000915],
+                    handle_in: [0.0, 0.0],
+                    handle_out: [0.0, 0.0],
+                },
+            ],
+        };
+        let tip_round = [true, true];
+        let outline = EyebrowOutline::from_guide_and_thickness(&guide, thickness, tip_round);
+        Self {
+            outline,
+            guide,
+            thickness,
+            tip_round,
+            base_y: 0.48,
+            follow: 0.15,
+            color: [0.0090, 0.0090, 0.0350],
+        }
+    }
+}
+
+impl EyebrowShape {
+    /// Rebuild the outline from the current guide and thickness.
+    pub fn rebuild_outline(&mut self) {
+        self.outline = EyebrowOutline::from_guide_and_thickness(&self.guide, self.thickness, self.tip_round);
+    }
+}
+
+/// Eyelash shape and behavior parameters.
+/// Rendered as a stroke along the upper edge of the eye outline,
+/// automatically following the contour during blinks.
+#[derive(Clone, Debug)]
+pub struct EyelashShape {
+    /// Eyelash fill color [R, G, B] in linear sRGB, 0..1.
+    pub color: [f32; 3],
+    /// Stroke thickness in eye-space units.
+    pub thickness: f32,
+}
+
+impl Default for EyelashShape {
+    fn default() -> Self {
+        Self {
+            color: [0.0090, 0.0090, 0.0350],
+            thickness: 0.020,
+        }
+    }
+}
+
+/// Iris shape parameters.
+/// Uses a single BezierOutline (no open/closed states — iris doesn't morph on blink).
+#[derive(Clone, Debug)]
+pub struct IrisShape {
+    pub outline: BezierOutline,
+}
+
+impl Default for IrisShape {
+    fn default() -> Self {
+        Self {
+            outline: BezierOutline::circle(0.15),
+        }
+    }
+}
+
+/// Pupil shape parameters.
+/// Uses a single BezierOutline (no open/closed states).
+#[derive(Clone, Debug)]
+pub struct PupilShape {
+    pub outline: BezierOutline,
+}
+
+impl Default for PupilShape {
+    fn default() -> Self {
+        Self {
+            outline: BezierOutline::circle(0.08),
         }
     }
 }
