@@ -563,7 +563,7 @@ impl ApplicationHandler for App {
 fn main() {
     env_logger::init();
 
-    let config_path = std::env::args().nth(1);
+    let config_path = std::env::args().nth(1).or_else(|| Some("eye_config.json".to_string()));
 
     let event_loop = EventLoop::new().unwrap();
     let mut app = App {
