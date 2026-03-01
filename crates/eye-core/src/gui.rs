@@ -1302,6 +1302,42 @@ fn restore_guide3(snaps: &[EyebrowAnchorSnapshot], anchors: &mut [BezierAnchor; 
     }
 }
 
+fn eyebrow_centroid_screen(
+    anchors: &[BezierAnchor; 3],
+    selected: &[bool],
+    to_screen: &impl Fn([f32; 2]) -> egui::Pos2,
+) -> egui::Pos2 {
+    let mut sx = 0.0f32;
+    let mut sy = 0.0f32;
+    let mut n = 0u32;
+    for i in 0..3 {
+        if i < selected.len() && selected[i] {
+            let scr = to_screen(anchors[i].position);
+            sx += scr.x;
+            sy += scr.y;
+            n += 1;
+        }
+    }
+    if n == 0 { egui::pos2(0.0, 0.0) } else { egui::pos2(sx / n as f32, sy / n as f32) }
+}
+
+fn eyebrow_centroid_eye_space(
+    snaps: &[EyebrowAnchorSnapshot],
+    selected: &[bool],
+) -> [f32; 2] {
+    let mut sx = 0.0f32;
+    let mut sy = 0.0f32;
+    let mut n = 0u32;
+    for i in 0..snaps.len() {
+        if i < selected.len() && selected[i] {
+            sx += snaps[i].position[0];
+            sy += snaps[i].position[1];
+            n += 1;
+        }
+    }
+    if n == 0 { [0.0, 0.0] } else { [sx / n as f32, sy / n as f32] }
+}
+
 #[derive(Clone, Debug)]
 enum EyebrowEditMode {
     Idle,
@@ -1309,6 +1345,13 @@ enum EyebrowEditMode {
         selected: Vec<bool>,
         original_guide: Vec<EyebrowAnchorSnapshot>,
         grab_origin: [f32; 2],
+    },
+    Scale {
+        selected: Vec<bool>,
+        original_guide: Vec<EyebrowAnchorSnapshot>,
+        pivot_screen_pos: [f32; 2],
+        initial_mouse_dist: f32,
+        axis: AxisConstraint,
     },
 }
 
@@ -1532,14 +1575,31 @@ fn eyebrow_guide_editor(
     }
 
     // --- Mode indicator ---
-    if matches!(&es.mode, EyebrowEditMode::Grab { .. }) {
-        painter.text(
-            egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
-            egui::Align2::LEFT_TOP,
-            "Grab (click=confirm, Esc=cancel)",
-            egui::FontId::proportional(11.0),
-            select_ring_color,
-        );
+    match &es.mode {
+        EyebrowEditMode::Grab { .. } => {
+            painter.text(
+                egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                "Grab (click=confirm, Esc=cancel)",
+                egui::FontId::proportional(11.0),
+                select_ring_color,
+            );
+        }
+        EyebrowEditMode::Scale { axis, .. } => {
+            let label = match axis {
+                AxisConstraint::None => "Scale (click=confirm, Esc=cancel)",
+                AxisConstraint::X    => "Scale X (click=confirm, Esc=cancel)",
+                AxisConstraint::Y    => "Scale Y (click=confirm, Esc=cancel)",
+            };
+            painter.text(
+                egui::pos2(rect.left() + 8.0, rect.top() + 8.0),
+                egui::Align2::LEFT_TOP,
+                label,
+                egui::FontId::proportional(11.0),
+                select_ring_color,
+            );
+        }
+        _ => {}
     }
 
     // --- Track whether guide was modified ---
@@ -1686,6 +1746,20 @@ fn eyebrow_guide_editor(
                 };
                 ui.ctx().request_repaint();
             }
+            // S: scale selected
+            if has_focus && es.has_selection() && ui.input(|i| i.key_pressed(egui::Key::S)) {
+                let pivot = eyebrow_centroid_screen(&shape.guide.anchors, &es.selected, &to_screen);
+                let mouse_pos = ui.input(|i| i.pointer.hover_pos()).unwrap_or(pivot);
+                let initial_dist = pivot.distance(mouse_pos).max(1.0);
+                es.mode = EyebrowEditMode::Scale {
+                    selected: es.selected.clone(),
+                    original_guide: snapshot_guide3(&shape.guide.anchors),
+                    pivot_screen_pos: [pivot.x, pivot.y],
+                    initial_mouse_dist: initial_dist,
+                    axis: AxisConstraint::None,
+                };
+                ui.ctx().request_repaint();
+            }
             // A: select all / deselect all
             if has_focus && ui.input(|i| i.key_pressed(egui::Key::A)) {
                 if es.has_selection() {
@@ -1726,6 +1800,64 @@ fn eyebrow_guide_editor(
                 restore_guide3(&original_guide, &mut shape.guide.anchors);
                 guide_changed = true;
                 es.mode = EyebrowEditMode::Idle;
+            }
+            ui.ctx().request_repaint();
+        }
+        EyebrowEditMode::Scale { selected, original_guide, pivot_screen_pos, initial_mouse_dist, mut axis } => {
+            // Toggle axis constraint with X/Y keys
+            if ui.input(|i| i.key_pressed(egui::Key::X)) {
+                axis = if axis == AxisConstraint::X { AxisConstraint::None } else { AxisConstraint::X };
+            }
+            if ui.input(|i| i.key_pressed(egui::Key::Y)) {
+                axis = if axis == AxisConstraint::Y { AxisConstraint::None } else { AxisConstraint::Y };
+            }
+
+            if let Some(mouse_pos) = ui.input(|i| i.pointer.hover_pos()) {
+                let pivot_scr = egui::pos2(pivot_screen_pos[0], pivot_screen_pos[1]);
+                let current_dist = pivot_scr.distance(mouse_pos).max(1.0);
+                let scale_factor = current_dist / initial_mouse_dist;
+
+                let (sx, sy) = match axis {
+                    AxisConstraint::None => (scale_factor, scale_factor),
+                    AxisConstraint::X    => (scale_factor, 1.0),
+                    AxisConstraint::Y    => (1.0, scale_factor),
+                };
+
+                let centroid = eyebrow_centroid_eye_space(&original_guide, &selected);
+
+                restore_guide3(&original_guide, &mut shape.guide.anchors);
+                for gi in 0..3 {
+                    if gi < selected.len() && selected[gi] {
+                        let orig = &original_guide[gi];
+                        shape.guide.anchors[gi].position = [
+                            centroid[0] + (orig.position[0] - centroid[0]) * sx,
+                            centroid[1] + (orig.position[1] - centroid[1]) * sy,
+                        ];
+                        shape.guide.anchors[gi].handle_in = [
+                            orig.handle_in[0] * sx,
+                            orig.handle_in[1] * sy,
+                        ];
+                        shape.guide.anchors[gi].handle_out = [
+                            orig.handle_out[0] * sx,
+                            orig.handle_out[1] * sy,
+                        ];
+                    }
+                }
+                guide_changed = true;
+            }
+
+            if ui.input(|i| i.pointer.button_pressed(egui::PointerButton::Primary)) {
+                es.mode = EyebrowEditMode::Idle;
+                es.skip_click_select = true;
+            } else if ui.input(|i| i.key_pressed(egui::Key::Escape)) {
+                restore_guide3(&original_guide, &mut shape.guide.anchors);
+                guide_changed = true;
+                es.mode = EyebrowEditMode::Idle;
+            } else {
+                // Write back potentially updated axis
+                es.mode = EyebrowEditMode::Scale {
+                    selected, original_guide, pivot_screen_pos, initial_mouse_dist, axis,
+                };
             }
             ui.ctx().request_repaint();
         }
