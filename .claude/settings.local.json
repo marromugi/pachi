@@ -4,7 +4,8 @@
       "Bash(cargo build:*)",
       "Bash(wc:*)",
       "Bash(cargo check:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(pdftotext:*)"
     ]
   }
 }
