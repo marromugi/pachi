@@ -273,7 +273,7 @@ impl ApplicationHandler for App {
 
                     // Squash & stretch driven by eyelid velocity
                     let dt = 1.0 / 60.0_f32;
-                    let eyelid_prev = state.blink_animation.evaluate(time - dt);
+                    let eyelid_prev = state.blink_animation.peek_value(time - dt);
                     let velocity = (eyelid_now - eyelid_prev) / dt;
                     const SQUASH_STRENGTH: f32 = 0.08;
                     const MAX_SQUASH: f32 = 0.045;
