@@ -22,6 +22,7 @@ pollster = "0.4"
 env_logger = "0.11"
 log = "0.4"
 rfd = "0.15"
+tungstenite = "0.26"
 
 [[example]]
 name = "desktop"

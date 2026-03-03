@@ -158,6 +158,7 @@ pub fn eye_control_panel(
     show_eyebrow: &mut bool,
     show_eyelash: &mut bool,
     focus_distance: &mut f32,
+    ws_connected: bool,
 ) -> GuiActions {
     let mut actions = GuiActions::default();
     egui::SidePanel::right("eye_controls")
@@ -198,7 +199,12 @@ pub fn eye_control_panel(
                 egui::CollapsingHeader::new("3D Perspective")
                     .default_open(true)
                     .show(ui, |ui| {
-                        ui.checkbox(follow_mouse, "Follow Mouse");
+                        if ws_connected {
+                            ui.label("WS: Connected");
+                        } else {
+                            ui.label("WS: Waiting (port 8765)");
+                        }
+                        ui.add_enabled(!ws_connected, egui::Checkbox::new(follow_mouse, "Follow Mouse"));
 
                         // Look X/Y follow iris link state
                         {
@@ -216,13 +222,14 @@ pub fn eye_control_panel(
                             } else {
                                 " [R]"
                             };
+                            let follow_active = *follow_mouse || ws_connected;
                             ui.add_enabled(
-                                !*follow_mouse,
+                                !follow_active,
                                 egui::Slider::new(&mut look_uniforms.look_x, -1.0..=1.0)
                                     .text(format!("Look X{suffix}")),
                             );
                             ui.add_enabled(
-                                !*follow_mouse,
+                                !follow_active,
                                 egui::Slider::new(&mut look_uniforms.look_y, -1.0..=1.0)
                                     .text(format!("Look Y{suffix}")),
                             );

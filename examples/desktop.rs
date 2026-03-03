@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use std::net::TcpListener;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use eye::gui::{eye_control_panel, EyeSideState, GuiActions, SectionLink};
@@ -8,6 +9,103 @@ use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
 use winit::keyboard::{Key, NamedKey};
 use winit::window::{Window, WindowId};
+
+// ============================================================
+// WebSocket gaze state
+// ============================================================
+
+/// Gaze parameters received from an external WebSocket client.
+#[derive(Clone, Debug, serde::Deserialize)]
+struct WsGazeMessage {
+    look_x: Option<f32>,
+    look_y: Option<f32>,
+    focus_distance: Option<f32>,
+    eyelid_close: Option<f32>,
+}
+
+struct WsGazeState {
+    look_x: f32,
+    look_y: f32,
+    focus_distance: f32,
+    eyelid_close: Option<f32>,
+    active: bool,
+}
+
+impl Default for WsGazeState {
+    fn default() -> Self {
+        Self {
+            look_x: 0.0,
+            look_y: 0.0,
+            focus_distance: 1.5,
+            eyelid_close: None,
+            active: false,
+        }
+    }
+}
+
+fn start_ws_server(shared: Arc<Mutex<WsGazeState>>) {
+    std::thread::Builder::new()
+        .name("ws-server".into())
+        .spawn(move || {
+            let listener = match TcpListener::bind("127.0.0.1:8765") {
+                Ok(l) => l,
+                Err(e) => {
+                    eprintln!("WebSocket server failed to bind: {e}");
+                    return;
+                }
+            };
+            log::info!("WebSocket server listening on ws://127.0.0.1:8765");
+
+            for stream in listener.incoming().flatten() {
+                let shared = shared.clone();
+                std::thread::spawn(move || {
+                    let mut ws = match tungstenite::accept(stream) {
+                        Ok(ws) => ws,
+                        Err(e) => {
+                            eprintln!("WebSocket accept error: {e}");
+                            return;
+                        }
+                    };
+                    log::info!("WebSocket client connected");
+                    if let Ok(mut state) = shared.lock() {
+                        state.active = true;
+                    }
+
+                    loop {
+                        match ws.read() {
+                            Ok(msg) if msg.is_text() => {
+                                let text = msg.into_text().unwrap_or_default();
+                                if let Ok(gaze) = serde_json::from_str::<WsGazeMessage>(&text) {
+                                    if let Ok(mut state) = shared.lock() {
+                                        if let Some(v) = gaze.look_x {
+                                            state.look_x = v.clamp(-1.0, 1.0);
+                                        }
+                                        if let Some(v) = gaze.look_y {
+                                            state.look_y = v.clamp(-1.0, 1.0);
+                                        }
+                                        if let Some(v) = gaze.focus_distance {
+                                            state.focus_distance = v.clamp(0.5, 20.0);
+                                        }
+                                        state.eyelid_close =
+                                            gaze.eyelid_close.map(|v| v.clamp(0.0, 1.0));
+                                    }
+                                }
+                            }
+                            Ok(msg) if msg.is_close() => break,
+                            Err(_) => break,
+                            _ => {}
+                        }
+                    }
+
+                    log::info!("WebSocket client disconnected");
+                    if let Ok(mut state) = shared.lock() {
+                        state.active = false;
+                    }
+                });
+            }
+        })
+        .expect("Failed to spawn WebSocket server thread");
+}
 
 struct App {
     state: Option<AppState>,
@@ -43,6 +141,9 @@ struct AppState {
     mouse_position: Option<winit::dpi::PhysicalPosition<f64>>,
     start_time: Instant,
 
+    // WebSocket
+    ws_gaze: Arc<Mutex<WsGazeState>>,
+
     // egui
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
@@ -60,7 +161,7 @@ impl ApplicationHandler for App {
                 .create_window(
                     Window::default_attributes()
                         .with_title("Eye")
-                        .with_inner_size(winit::dpi::LogicalSize::new(1280, 720)),
+                        .with_inner_size(winit::dpi::LogicalSize::new(600, 480)),
                 )
                 .unwrap(),
         );
@@ -146,11 +247,15 @@ impl ApplicationHandler for App {
                 focus_distance: 1.5,
                 mouse_position: None,
                 start_time: Instant::now(),
+                ws_gaze: Arc::new(Mutex::new(WsGazeState::default())),
                 egui_ctx,
                 egui_state,
                 egui_renderer,
             }
         });
+
+        // Start WebSocket server
+        start_ws_server(state.ws_gaze.clone());
 
         // Apply config from command-line argument if provided
         if let Some(path) = &self.config_path {
@@ -289,8 +394,29 @@ impl ApplicationHandler for App {
                     state.right.uniforms.squash_stretch = 0.0;
                 }
 
-                // Mouse follow → look_x / look_y (applies to both eyes)
-                if state.follow_mouse {
+                // Gaze input: WebSocket takes priority over mouse follow
+                let ws_active = state
+                    .ws_gaze
+                    .lock()
+                    .map(|ws| {
+                        if ws.active {
+                            state.left.uniforms.look_x = ws.look_x;
+                            state.left.uniforms.look_y = ws.look_y;
+                            state.right.uniforms.look_x = ws.look_x;
+                            state.right.uniforms.look_y = ws.look_y;
+                            state.focus_distance = ws.focus_distance;
+                            if let Some(ec) = ws.eyelid_close {
+                                state.left.uniforms.eyelid_close = ec;
+                                state.right.uniforms.eyelid_close = ec;
+                            }
+                            true
+                        } else {
+                            false
+                        }
+                    })
+                    .unwrap_or(false);
+
+                if !ws_active && state.follow_mouse {
                     if let Some(pos) = state.mouse_position {
                         let cx = state.surface_config.width as f64 / 2.0;
                         let cy = state.surface_config.height as f64 / 2.0;
@@ -306,9 +432,24 @@ impl ApplicationHandler for App {
                 }
 
                 // Focus distance → convergence offset (global)
-                let half_ipd = state.left.uniforms.eye_separation * 0.5;
-                let convergence = (half_ipd / state.focus_distance * 0.08)
-                    .clamp(0.0, state.left.uniforms.iris_follow * 0.8);
+                // Physical eye separation on screen scales with window size.
+                // Model: each eye rotates inward to converge at the viewer.
+                let scale_factor = state.window.scale_factor() as f32;
+                let logical_height =
+                    state.surface_config.height as f32 / scale_factor;
+                let half_ipd_lp = state.left.uniforms.eye_separation
+                    * logical_height
+                    * 0.25;
+                let viewer_dist_lp = state.focus_distance * 800.0;
+                let conv_angle = (half_ipd_lp / viewer_dist_lp).atan();
+                let iris_follow = state.left.uniforms.iris_follow;
+                let max_angle = state.left.uniforms.max_angle;
+                let convergence = if max_angle > 0.001 {
+                    (conv_angle * iris_follow / max_angle)
+                        .clamp(0.0, iris_follow * 0.8)
+                } else {
+                    0.0
+                };
                 state.left.uniforms.convergence = convergence;
                 state.right.uniforms.convergence = convergence;
 
@@ -376,6 +517,7 @@ impl ApplicationHandler for App {
                             &mut state.show_eyebrow,
                             &mut state.show_eyelash,
                             &mut state.focus_distance,
+                            ws_active,
                         );
                     }
                 });
@@ -551,7 +693,7 @@ impl ApplicationHandler for App {
                 output.present();
 
                 // Only request next frame when animation is running
-                if state.auto_blink {
+                if state.auto_blink || ws_active {
                     state.window.request_redraw();
                 }
             }
