@@ -1,5 +1,6 @@
 use egui;
 
+use crate::nod::NodAnimation;
 use crate::outline::{BezierAnchor, BezierOutline, EyelashShape, EyeShape, EyebrowShape, IrisShape, PupilShape};
 use crate::EyeUniforms;
 
@@ -11,6 +12,7 @@ use crate::EyeUniforms;
 pub struct GuiActions {
     pub export_requested: bool,
     pub import_requested: bool,
+    pub nod_triggered: bool,
 }
 
 // ============================================================
@@ -158,6 +160,7 @@ pub fn eye_control_panel(
     show_eyebrow: &mut bool,
     show_eyelash: &mut bool,
     focus_distance: &mut f32,
+    nod_animation: &mut NodAnimation,
     ws_connected: bool,
 ) -> GuiActions {
     let mut actions = GuiActions::default();
@@ -541,6 +544,38 @@ pub fn eye_control_panel(
                             color_edit_rgb(ui, &mut left.uniforms.sclera_color);
                         });
                         right.uniforms.sclera_color = left.uniforms.sclera_color;
+                    });
+
+                ui.separator();
+
+                // --- Nod Animation ---
+                egui::CollapsingHeader::new("Nod")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        if ui.button("Trigger Nod").clicked() {
+                            actions.nod_triggered = true;
+                        }
+                        ui.add(
+                            egui::Slider::new(&mut nod_animation.amount, 0.0..=1.0)
+                                .text("Amount"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut nod_animation.duration, 0.1..=3.0)
+                                .text("Duration (s)"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut nod_animation.mid_closeness, 0.0..=1.0)
+                                .text("Mid Closeness"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut nod_animation.end_openness, 0.0..=1.0)
+                                .text("End Openness"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut nod_animation.pivot_y, -2.0..=0.0)
+                                .text("Pivot Y"),
+                        );
+                        nod_curve_editor(ui, &mut nod_animation.curve, "nod_curve");
                     });
 
                 ui.separator();
@@ -1907,6 +1942,339 @@ fn format_eyebrow_shape(shape: &EyebrowShape) -> String {
     }
     s.push_str("        ],\n    },\n}");
     s
+}
+
+// ============================================================
+// Nod curve editor
+// ============================================================
+
+use crate::nod::NodCurve;
+
+const NOD_DRAG_NONE: i32 = -1;
+
+#[derive(Clone, Debug)]
+struct NodEditorState {
+    drag_idx: i32,
+}
+
+impl Default for NodEditorState {
+    fn default() -> Self {
+        Self {
+            drag_idx: NOD_DRAG_NONE,
+        }
+    }
+}
+
+fn nod_curve_editor(
+    ui: &mut egui::Ui,
+    curve: &mut NodCurve,
+    editor_id: &str,
+) {
+    let available_width = ui.available_width();
+    let size = available_width.min(350.0);
+    let (response, painter) = ui.allocate_painter(
+        egui::vec2(size, size * 0.6),
+        egui::Sense::click_and_drag(),
+    );
+    let rect = response.rect;
+
+    // Coordinate mapping: X axis [0,1] = time, Y axis [0,1] = intensity
+    // Y is flipped: screen Y increases downward, but intensity increases upward
+    let margin = 16.0;
+    let plot_rect = egui::Rect::from_min_max(
+        egui::pos2(rect.left() + margin, rect.top() + margin),
+        egui::pos2(rect.right() - margin, rect.bottom() - margin),
+    );
+
+    let to_screen = |p: [f32; 2]| -> egui::Pos2 {
+        egui::pos2(
+            plot_rect.left() + p[0] * plot_rect.width(),
+            plot_rect.bottom() - p[1] * plot_rect.height(),
+        )
+    };
+    let from_screen = |p: egui::Pos2| -> [f32; 2] {
+        [
+            (p.x - plot_rect.left()) / plot_rect.width(),
+            (plot_rect.bottom() - p.y) / plot_rect.height(),
+        ]
+    };
+
+    // --- Editor state ---
+    let state_id = response.id.with(editor_id).with("nod_editor_state");
+    let mut es: NodEditorState =
+        ui.memory(|m| m.data.get_temp(state_id)).unwrap_or_default();
+
+    // --- Find hovered element ---
+    // Encoding:
+    //   1 = anchor[1] (Middle position)
+    //   3 = anchor[0].handle_out (Start outgoing)
+    //   4 = anchor[1].handle_in
+    //   7 = anchor[1].handle_out
+    //   5 = anchor[2].handle_in (End incoming)
+    let hover_threshold = 12.0f32;
+    let mut hovered_idx: i32 = NOD_DRAG_NONE;
+    if es.drag_idx == NOD_DRAG_NONE {
+        if let Some(pos) = response.hover_pos() {
+            let mut best_dist = hover_threshold;
+            // Middle anchor (draggable)
+            let d = pos.distance(to_screen(curve.anchors[1].position));
+            if d < best_dist { best_dist = d; hovered_idx = 1; }
+            // Start handle_out
+            let ho0 = [
+                curve.anchors[0].position[0] + curve.anchors[0].handle_out[0],
+                curve.anchors[0].position[1] + curve.anchors[0].handle_out[1],
+            ];
+            let d = pos.distance(to_screen(ho0));
+            if d < best_dist { best_dist = d; hovered_idx = 3; }
+            // Middle handle_in
+            let hi1 = [
+                curve.anchors[1].position[0] + curve.anchors[1].handle_in[0],
+                curve.anchors[1].position[1] + curve.anchors[1].handle_in[1],
+            ];
+            let d = pos.distance(to_screen(hi1));
+            if d < best_dist { best_dist = d; hovered_idx = 4; }
+            // Middle handle_out
+            let ho1 = [
+                curve.anchors[1].position[0] + curve.anchors[1].handle_out[0],
+                curve.anchors[1].position[1] + curve.anchors[1].handle_out[1],
+            ];
+            let d = pos.distance(to_screen(ho1));
+            if d < best_dist { best_dist = d; hovered_idx = 7; }
+            // End handle_in
+            let hi2 = [
+                curve.anchors[2].position[0] + curve.anchors[2].handle_in[0],
+                curve.anchors[2].position[1] + curve.anchors[2].handle_in[1],
+            ];
+            let d = pos.distance(to_screen(hi2));
+            if d < best_dist { hovered_idx = 5; }
+        }
+    }
+
+    // --- Background ---
+    painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
+
+    // Grid lines
+    let grid_color = egui::Color32::from_gray(55);
+    let grid_label_color = egui::Color32::from_gray(90);
+    for &gy in &[0.0f32, 0.5, 1.0] {
+        let y = plot_rect.bottom() - gy * plot_rect.height();
+        painter.line_segment(
+            [egui::pos2(plot_rect.left(), y), egui::pos2(plot_rect.right(), y)],
+            egui::Stroke::new(0.5, grid_color),
+        );
+        painter.text(
+            egui::pos2(plot_rect.left() - 2.0, y),
+            egui::Align2::RIGHT_CENTER,
+            format!("{:.1}", gy),
+            egui::FontId::proportional(9.0),
+            grid_label_color,
+        );
+    }
+    for &gx in &[0.0f32, 0.5, 1.0] {
+        let x = plot_rect.left() + gx * plot_rect.width();
+        painter.line_segment(
+            [egui::pos2(x, plot_rect.top()), egui::pos2(x, plot_rect.bottom())],
+            egui::Stroke::new(0.5, grid_color),
+        );
+    }
+
+    // --- Colors ---
+    let curve_color = egui::Color32::from_rgb(80, 200, 140);
+    let handle_line_color = egui::Color32::from_gray(80);
+    let handle_color = egui::Color32::from_rgb(220, 180, 60);
+    let handle_hover = egui::Color32::from_rgb(255, 220, 100);
+    let anchor_color = egui::Color32::WHITE;
+    let anchor_fixed_color = egui::Color32::from_gray(140);
+    let anchor_hover = egui::Color32::from_rgb(180, 255, 200);
+
+    // --- Draw bezier curve (2 segments) ---
+    for seg in 0..2 {
+        let a = &curve.anchors[seg];
+        let b = &curve.anchors[seg + 1];
+        let p0 = a.position;
+        let p1 = [p0[0] + a.handle_out[0], p0[1] + a.handle_out[1]];
+        let p3 = b.position;
+        let p2 = [p3[0] + b.handle_in[0], p3[1] + b.handle_in[1]];
+
+        let subdiv = 32;
+        let mut prev_pt = to_screen(p0);
+        for j in 1..=subdiv {
+            let t = j as f32 / subdiv as f32;
+            let omt = 1.0 - t;
+            let x = omt * omt * omt * p0[0]
+                + 3.0 * omt * omt * t * p1[0]
+                + 3.0 * omt * t * t * p2[0]
+                + t * t * t * p3[0];
+            let y = omt * omt * omt * p0[1]
+                + 3.0 * omt * omt * t * p1[1]
+                + 3.0 * omt * t * t * p2[1]
+                + t * t * t * p3[1];
+            let curr = to_screen([x, y]);
+            painter.line_segment([prev_pt, curr], egui::Stroke::new(2.0, curve_color));
+            prev_pt = curr;
+        }
+    }
+
+    // --- Draw handles ---
+    // Start handle_out
+    {
+        let a_scr = to_screen(curve.anchors[0].position);
+        let ho = [
+            curve.anchors[0].position[0] + curve.anchors[0].handle_out[0],
+            curve.anchors[0].position[1] + curve.anchors[0].handle_out[1],
+        ];
+        let ho_scr = to_screen(ho);
+        painter.line_segment([a_scr, ho_scr], egui::Stroke::new(1.0, handle_line_color));
+        let active = hovered_idx == 3 || es.drag_idx == 3;
+        painter.circle_filled(ho_scr, if active { 5.0 } else { 3.5 }, if active { handle_hover } else { handle_color });
+    }
+    // Middle handles
+    {
+        let a_scr = to_screen(curve.anchors[1].position);
+        let hi = [
+            curve.anchors[1].position[0] + curve.anchors[1].handle_in[0],
+            curve.anchors[1].position[1] + curve.anchors[1].handle_in[1],
+        ];
+        let ho = [
+            curve.anchors[1].position[0] + curve.anchors[1].handle_out[0],
+            curve.anchors[1].position[1] + curve.anchors[1].handle_out[1],
+        ];
+        let hi_scr = to_screen(hi);
+        let ho_scr = to_screen(ho);
+        painter.line_segment([a_scr, hi_scr], egui::Stroke::new(1.0, handle_line_color));
+        painter.line_segment([a_scr, ho_scr], egui::Stroke::new(1.0, handle_line_color));
+        let hi_active = hovered_idx == 4 || es.drag_idx == 4;
+        let ho_active = hovered_idx == 7 || es.drag_idx == 7;
+        painter.circle_filled(hi_scr, if hi_active { 5.0 } else { 3.5 }, if hi_active { handle_hover } else { handle_color });
+        painter.circle_filled(ho_scr, if ho_active { 5.0 } else { 3.5 }, if ho_active { handle_hover } else { handle_color });
+    }
+    // End handle_in
+    {
+        let a_scr = to_screen(curve.anchors[2].position);
+        let hi = [
+            curve.anchors[2].position[0] + curve.anchors[2].handle_in[0],
+            curve.anchors[2].position[1] + curve.anchors[2].handle_in[1],
+        ];
+        let hi_scr = to_screen(hi);
+        painter.line_segment([a_scr, hi_scr], egui::Stroke::new(1.0, handle_line_color));
+        let active = hovered_idx == 5 || es.drag_idx == 5;
+        painter.circle_filled(hi_scr, if active { 5.0 } else { 3.5 }, if active { handle_hover } else { handle_color });
+    }
+
+    // --- Draw anchors ---
+    // Start (fixed)
+    {
+        let scr = to_screen(curve.anchors[0].position);
+        painter.circle_filled(scr, 5.0, anchor_fixed_color);
+    }
+    // Middle (draggable)
+    {
+        let scr = to_screen(curve.anchors[1].position);
+        let active = hovered_idx == 1 || es.drag_idx == 1;
+        painter.circle_filled(scr, if active { 7.0 } else { 5.0 }, if active { anchor_hover } else { anchor_color });
+    }
+    // End (fixed)
+    {
+        let scr = to_screen(curve.anchors[2].position);
+        painter.circle_filled(scr, 5.0, anchor_fixed_color);
+    }
+
+    // --- Drag interaction ---
+    if response.drag_started() {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let threshold = 15.0f32;
+            let mut best_dist = threshold;
+            es.drag_idx = NOD_DRAG_NONE;
+
+            // Middle anchor
+            let d = pos.distance(to_screen(curve.anchors[1].position));
+            if d < best_dist { best_dist = d; es.drag_idx = 1; }
+            // Start handle_out
+            let ho0 = [
+                curve.anchors[0].position[0] + curve.anchors[0].handle_out[0],
+                curve.anchors[0].position[1] + curve.anchors[0].handle_out[1],
+            ];
+            let d = pos.distance(to_screen(ho0));
+            if d < best_dist { best_dist = d; es.drag_idx = 3; }
+            // Middle handle_in
+            let hi1 = [
+                curve.anchors[1].position[0] + curve.anchors[1].handle_in[0],
+                curve.anchors[1].position[1] + curve.anchors[1].handle_in[1],
+            ];
+            let d = pos.distance(to_screen(hi1));
+            if d < best_dist { best_dist = d; es.drag_idx = 4; }
+            // Middle handle_out
+            let ho1 = [
+                curve.anchors[1].position[0] + curve.anchors[1].handle_out[0],
+                curve.anchors[1].position[1] + curve.anchors[1].handle_out[1],
+            ];
+            let d = pos.distance(to_screen(ho1));
+            if d < best_dist { best_dist = d; es.drag_idx = 7; }
+            // End handle_in
+            let hi2 = [
+                curve.anchors[2].position[0] + curve.anchors[2].handle_in[0],
+                curve.anchors[2].position[1] + curve.anchors[2].handle_in[1],
+            ];
+            let d = pos.distance(to_screen(hi2));
+            if d < best_dist { es.drag_idx = 5; }
+        }
+    }
+
+    if response.dragged() && es.drag_idx != NOD_DRAG_NONE {
+        if let Some(pos) = response.interact_pointer_pos() {
+            let p = from_screen(pos);
+            match es.drag_idx {
+                1 => {
+                    // Middle anchor: clamp position
+                    curve.anchors[1].position = [
+                        p[0].clamp(0.01, 0.99),
+                        p[1].clamp(0.0, 1.5),
+                    ];
+                }
+                3 => {
+                    // Start handle_out: relative to anchor[0]
+                    let anchor = curve.anchors[0].position;
+                    curve.anchors[0].handle_out = [
+                        (p[0] - anchor[0]).max(0.0), // must be positive X (forward in time)
+                        p[1] - anchor[1],
+                    ];
+                }
+                4 => {
+                    // Middle handle_in: relative to anchor[1]
+                    let anchor = curve.anchors[1].position;
+                    curve.anchors[1].handle_in = [
+                        (p[0] - anchor[0]).min(0.0), // must be negative X (backward)
+                        p[1] - anchor[1],
+                    ];
+                    curve.anchors[1].enforce_collinear_from_in();
+                }
+                7 => {
+                    // Middle handle_out: relative to anchor[1]
+                    let anchor = curve.anchors[1].position;
+                    curve.anchors[1].handle_out = [
+                        (p[0] - anchor[0]).max(0.0), // must be positive X (forward)
+                        p[1] - anchor[1],
+                    ];
+                    curve.anchors[1].enforce_collinear_from_out();
+                }
+                5 => {
+                    // End handle_in: relative to anchor[2]
+                    let anchor = curve.anchors[2].position;
+                    curve.anchors[2].handle_in = [
+                        (p[0] - anchor[0]).min(0.0), // must be negative X (backward)
+                        p[1] - anchor[1],
+                    ];
+                }
+                _ => {}
+            }
+        }
+    }
+
+    if response.drag_stopped() {
+        es.drag_idx = NOD_DRAG_NONE;
+    }
+
+    ui.memory_mut(|m| m.data.insert_temp(state_id, es));
 }
 
 fn color_edit_rgb(ui: &mut egui::Ui, color: &mut [f32; 3]) {

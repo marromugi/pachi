@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 
+use crate::nod::{NodAnimation, NodCurve};
 use crate::outline::{
     BezierAnchor, BezierOutline, EyeShape, EyebrowGuide, EyebrowOutline, EyebrowShape,
     EyelashShape, IrisShape, PupilShape,
@@ -104,6 +105,93 @@ pub struct EyelashShapeConfig {
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NodCurveConfig {
+    pub anchors: [BezierAnchorConfig; 3],
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct NodConfig {
+    pub curve: NodCurveConfig,
+    pub amount: f32,
+    pub duration: f32,
+    #[serde(default = "default_mid_closeness")]
+    pub mid_closeness: f32,
+    pub end_openness: f32,
+    #[serde(default = "default_nod_pivot_y")]
+    pub pivot_y: f32,
+}
+
+fn default_mid_closeness() -> f32 {
+    1.0
+}
+
+fn default_nod_pivot_y() -> f32 {
+    -1.0
+}
+
+impl Default for NodConfig {
+    fn default() -> Self {
+        let nod = NodAnimation::default();
+        Self {
+            curve: NodCurveConfig::from(&nod.curve),
+            amount: nod.amount,
+            duration: nod.duration,
+            mid_closeness: nod.mid_closeness,
+            end_openness: nod.end_openness,
+            pivot_y: nod.pivot_y,
+        }
+    }
+}
+
+impl From<&NodCurve> for NodCurveConfig {
+    fn from(c: &NodCurve) -> Self {
+        Self {
+            anchors: [
+                BezierAnchorConfig::from(&c.anchors[0]),
+                BezierAnchorConfig::from(&c.anchors[1]),
+                BezierAnchorConfig::from(&c.anchors[2]),
+            ],
+        }
+    }
+}
+
+impl From<&NodCurveConfig> for NodCurve {
+    fn from(c: &NodCurveConfig) -> Self {
+        Self {
+            anchors: [
+                BezierAnchor::from(&c.anchors[0]),
+                BezierAnchor::from(&c.anchors[1]),
+                BezierAnchor::from(&c.anchors[2]),
+            ],
+        }
+    }
+}
+
+impl From<&NodAnimation> for NodConfig {
+    fn from(a: &NodAnimation) -> Self {
+        Self {
+            curve: NodCurveConfig::from(&a.curve),
+            amount: a.amount,
+            duration: a.duration,
+            mid_closeness: a.mid_closeness,
+            end_openness: a.end_openness,
+            pivot_y: a.pivot_y,
+        }
+    }
+}
+
+impl NodConfig {
+    pub fn apply_to(&self, a: &mut NodAnimation) {
+        a.curve = NodCurve::from(&self.curve);
+        a.amount = self.amount;
+        a.duration = self.duration;
+        a.mid_closeness = self.mid_closeness;
+        a.end_openness = self.end_openness;
+        a.pivot_y = self.pivot_y;
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct GlobalConfig {
     pub bg_color: [f32; 3],
     pub eye_separation: f32,
@@ -115,6 +203,8 @@ pub struct GlobalConfig {
     pub show_highlight: bool,
     pub show_eyebrow: bool,
     pub show_eyelash: bool,
+    #[serde(default)]
+    pub nod: NodConfig,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -406,6 +496,7 @@ impl EyeConfig {
         show_eyebrow: bool,
         show_eyelash: bool,
         focus_distance: f32,
+        nod_animation: &NodAnimation,
     ) -> Self {
         Self {
             version: Self::CURRENT_VERSION,
@@ -422,6 +513,7 @@ impl EyeConfig {
                 show_highlight,
                 show_eyebrow,
                 show_eyelash,
+                nod: NodConfig::from(nod_animation),
             },
             links: LinkConfig {
                 shape: SectionLinkConfig::from(link_shape),
@@ -446,6 +538,7 @@ impl EyeConfig {
         show_eyebrow: &mut bool,
         show_eyelash: &mut bool,
         focus_distance: &mut f32,
+        nod_animation: &mut NodAnimation,
     ) {
         // Preserve runtime-only fields
         let aspect = left.uniforms.aspect_ratio;
@@ -476,6 +569,9 @@ impl EyeConfig {
         *show_eyebrow = self.global.show_eyebrow;
         *show_eyelash = self.global.show_eyelash;
         *focus_distance = self.global.focus_distance;
+
+        // Nod
+        self.global.nod.apply_to(nod_animation);
 
         // Links
         *link_shape = self.links.shape.to_section_link();

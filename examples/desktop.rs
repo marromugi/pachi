@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use eye::gui::{eye_control_panel, EyeSideState, GuiActions, SectionLink};
-use eye::{BlinkAnimation, EyeConfig, EyePairUniforms, EyeRenderer};
+use eye::{BlinkAnimation, EyeConfig, EyePairUniforms, EyeRenderer, NodAnimation};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -131,6 +131,7 @@ struct AppState {
     link_eyelash: SectionLink,
 
     blink_animation: BlinkAnimation,
+    nod_animation: NodAnimation,
     auto_blink: bool,
     follow_mouse: bool,
     show_highlight: bool,
@@ -238,6 +239,7 @@ impl ApplicationHandler for App {
                 link_eyebrow: SectionLink::default(),
                 link_eyelash: SectionLink::default(),
                 blink_animation: BlinkAnimation::sample(),
+                nod_animation: NodAnimation::default(),
                 auto_blink: true,
                 follow_mouse: true,
                 show_highlight: true,
@@ -275,6 +277,7 @@ impl ApplicationHandler for App {
                             &mut state.show_eyebrow,
                             &mut state.show_eyelash,
                             &mut state.focus_distance,
+                            &mut state.nod_animation,
                         );
                     }
                     Err(e) => eprintln!("Invalid config JSON: {e}"),
@@ -296,20 +299,38 @@ impl ApplicationHandler for App {
             return;
         };
 
-        // Intercept Tab before egui consumes it
+        // Intercept shortcut keys before egui consumes them
         if let WindowEvent::KeyboardInput {
             event:
                 KeyEvent {
-                    logical_key: Key::Named(NamedKey::Tab),
+                    logical_key,
                     state: ElementState::Pressed,
                     ..
                 },
             ..
         } = &event
         {
-            state.show_sidebar = !state.show_sidebar;
-            state.window.request_redraw();
-            return;
+            match logical_key {
+                Key::Named(NamedKey::Tab) => {
+                    state.show_sidebar = !state.show_sidebar;
+                    state.window.request_redraw();
+                    return;
+                }
+                Key::Character(c) if c.as_str() == "b" => {
+                    let time = state.start_time.elapsed().as_secs_f32();
+                    state.blink_animation.trigger(time);
+                    state.window.request_redraw();
+                    return;
+                }
+                Key::Character(c) if c.as_str() == "n" => {
+                    let time = state.start_time.elapsed().as_secs_f32();
+                    let current_eyelid = state.left.uniforms.eyelid_close;
+                    state.nod_animation.trigger(time, current_eyelid);
+                    state.window.request_redraw();
+                    return;
+                }
+                _ => {}
+            }
         }
 
         // Pass events to egui first
@@ -453,6 +474,19 @@ impl ApplicationHandler for App {
                 state.left.uniforms.convergence = convergence;
                 state.right.uniforms.convergence = convergence;
 
+                // Nod animation: sets nod_pitch uniform and overrides eyelid_close
+                if let Some(nod_out) = state.nod_animation.evaluate(time) {
+                    state.left.uniforms.nod_pitch = nod_out.nod_pitch;
+                    state.right.uniforms.nod_pitch = nod_out.nod_pitch;
+                    state.left.uniforms.nod_pivot_y = state.nod_animation.pivot_y;
+                    state.right.uniforms.nod_pivot_y = state.nod_animation.pivot_y;
+                    state.left.uniforms.eyelid_close = nod_out.eyelid_close;
+                    state.right.uniforms.eyelid_close = nod_out.eyelid_close;
+                } else {
+                    state.left.uniforms.nod_pitch = 0.0;
+                    state.right.uniforms.nod_pitch = 0.0;
+                }
+
                 // Sync shapes into respective uniforms
                 state.left.uniforms.outline_open =
                     state.left.eye_shape.open.to_uniform_array();
@@ -517,12 +551,18 @@ impl ApplicationHandler for App {
                             &mut state.show_eyebrow,
                             &mut state.show_eyelash,
                             &mut state.focus_distance,
+                            &mut state.nod_animation,
                             ws_active,
                         );
                     }
                 });
 
                 // Handle GUI actions
+                if gui_actions.nod_triggered {
+                    let current_eyelid = state.left.uniforms.eyelid_close;
+                    state.nod_animation.trigger(time, current_eyelid);
+                }
+
                 if gui_actions.export_requested {
                     let config = EyeConfig::from_state(
                         &state.left,
@@ -537,6 +577,7 @@ impl ApplicationHandler for App {
                         state.show_eyebrow,
                         state.show_eyelash,
                         state.focus_distance,
+                        &state.nod_animation,
                     );
                     if let Ok(json) = config.to_json() {
                         let file = rfd::FileDialog::new()
@@ -574,6 +615,7 @@ impl ApplicationHandler for App {
                                         &mut state.show_eyebrow,
                                         &mut state.show_eyelash,
                                         &mut state.focus_distance,
+                                        &mut state.nod_animation,
                                     );
                                 }
                                 Err(e) => eprintln!("Invalid config JSON: {e}"),
@@ -693,7 +735,7 @@ impl ApplicationHandler for App {
                 output.present();
 
                 // Only request next frame when animation is running
-                if state.auto_blink || ws_active {
+                if state.auto_blink || ws_active || state.nod_animation.is_active() {
                     state.window.request_redraw();
                 }
             }

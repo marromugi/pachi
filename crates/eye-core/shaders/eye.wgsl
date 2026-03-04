@@ -33,8 +33,8 @@ struct Uniforms {
     iris_radius: f32,
     iris_follow: f32,
     iris_offset_y: f32,
-    _pad_iris_b: f32,
-    _pad_iris_c: f32,
+    nod_pitch: f32,
+    nod_pivot_y: f32,
 
     // Bezier outline: open state (128 bytes)
     // 4 segments × 2 vec4f. Each vec4f packs 2 vec2f control points.
@@ -466,10 +466,28 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
     // Scene-level parameters from left (Rust side keeps global params in sync)
     let g = pair.left;
 
-    let p = vec2f(
+    var p = vec2f(
         (in.uv.x * 2.0 - 1.0) * g.aspect_ratio,
         -(in.uv.y * 2.0 - 1.0)
     );
+
+    // --- Nod: perspective tilt of the face plane ---
+    // Inverse projection: for each screen pixel, find the corresponding point
+    // on the tilted face plane. Creates natural foreshortening (top expands,
+    // bottom compresses) as if the display/face is physically tilting forward.
+    let nod = -g.nod_pitch;
+    if abs(nod) > 0.001 {
+        let pivot = g.nod_pivot_y;
+        let D = 3.0;
+        let s = sin(nod);
+        let c = cos(nod);
+        let denom = p.y * s - D * c;
+        let u_val = D * (pivot - p.y) / denom;
+        p = vec2f(
+            p.x * (D + u_val * s) / D,
+            pivot + u_val
+        );
+    }
 
     var color = g.bg_color;
 

@@ -39,7 +39,8 @@ pub struct EyeUniforms {
     pub iris_radius: f32,            // offset 92  | iris circle radius
     pub iris_follow: f32,            // offset 96  | gaze follow scale
     pub iris_offset_y: f32,          // offset 100 | static vertical offset (negative = down)
-    pub _pad_iris: [f32; 2],         // offset 104 | padding to 16-byte boundary
+    pub nod_pitch: f32,              // offset 104 | nod tilt angle (radians, >0 = forward)
+    pub nod_pivot_y: f32,            // offset 108 | nod rotation pivot Y (screen space)
 
     // -- Bezier outline open -- (128 bytes, offset 112)
     // 4 segments x 2 vec4f each. Each vec4f packs 2 vec2f control points.
@@ -122,7 +123,8 @@ impl Default for EyeUniforms {
             iris_radius: 0.15,
             iris_follow: 0.14,
             iris_offset_y: -0.02,
-            _pad_iris: [0.0, 0.0],
+            nod_pitch: 0.0,
+            nod_pivot_y: -1.0,
 
             // Bezier outline
             outline_open: BezierOutline::ellipse(0.28, 0.35).to_uniform_array(),

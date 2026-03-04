@@ -104,6 +104,13 @@ impl BlinkAnimation {
         Self::new(42, 0.20)
     }
 
+    /// Trigger an immediate blink at time `t`.
+    pub fn trigger(&mut self, t: f32) {
+        self.current_blink = Some(self.generate_blink(t));
+        let total = self.current_blink.as_ref().unwrap().total_duration();
+        self.next_blink_time = t + total + self.rng.range(4.0, 10.0);
+    }
+
     /// Advance internal state and return the current `eyelid_close` value.
     ///
     /// Must be called with monotonically increasing `t` (seconds since start).
