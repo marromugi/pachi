@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use eye::gui::{eye_control_panel, EyeSideState, GuiActions, SectionLink};
-use eye::{BlinkAnimation, EyeConfig, EyePairUniforms, EyeRenderer, NodAnimation};
+use eye::{BlinkAnimation, EyeConfig, EyePairUniforms, EyeRenderer, ListeningNod, NodAnimation};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -107,6 +107,100 @@ fn start_ws_server(shared: Arc<Mutex<WsGazeState>>) {
         .expect("Failed to spawn WebSocket server thread");
 }
 
+// ============================================================
+// Audio capture state
+// ============================================================
+
+struct AudioState {
+    rms: f32,
+    active: bool,
+}
+
+impl Default for AudioState {
+    fn default() -> Self {
+        Self {
+            rms: 0.0,
+            active: false,
+        }
+    }
+}
+
+fn start_audio_capture(shared: Arc<Mutex<AudioState>>) {
+    std::thread::Builder::new()
+        .name("audio-capture".into())
+        .spawn(move || {
+            use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+
+            let host = cpal::default_host();
+            let device = match host.default_input_device() {
+                Some(d) => d,
+                None => {
+                    eprintln!("No default audio input device found");
+                    return;
+                }
+            };
+
+            let config = match device.default_input_config() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("Failed to get default input config: {e}");
+                    return;
+                }
+            };
+
+            log::info!(
+                "Audio capture: {} ({} Hz, {} ch)",
+                device.name().unwrap_or_default(),
+                config.sample_rate().0,
+                config.channels()
+            );
+
+            let channels = config.channels() as usize;
+            let shared_clone = shared.clone();
+            let alpha: f32 = 0.3;
+
+            let stream = device
+                .build_input_stream(
+                    &config.into(),
+                    move |data: &[f32], _: &cpal::InputCallbackInfo| {
+                        let mut sum_sq = 0.0_f32;
+                        let mut count = 0usize;
+                        for frame in data.chunks(channels) {
+                            let mono: f32 = frame.iter().sum::<f32>() / channels as f32;
+                            sum_sq += mono * mono;
+                            count += 1;
+                        }
+                        let rms = if count > 0 {
+                            (sum_sq / count as f32).sqrt()
+                        } else {
+                            0.0
+                        };
+
+                        if let Ok(mut state) = shared_clone.lock() {
+                            state.rms = alpha * rms + (1.0 - alpha) * state.rms;
+                        }
+                    },
+                    |err| {
+                        eprintln!("Audio capture error: {err}");
+                    },
+                    None,
+                )
+                .expect("Failed to build audio input stream");
+
+            stream.play().expect("Failed to start audio stream");
+
+            if let Ok(mut state) = shared.lock() {
+                state.active = true;
+            }
+
+            // Keep thread alive to hold the stream
+            loop {
+                std::thread::park();
+            }
+        })
+        .expect("Failed to spawn audio capture thread");
+}
+
 struct App {
     state: Option<AppState>,
     config_path: Option<String>,
@@ -144,6 +238,10 @@ struct AppState {
 
     // WebSocket
     ws_gaze: Arc<Mutex<WsGazeState>>,
+
+    // Audio / Listening
+    audio_state: Arc<Mutex<AudioState>>,
+    listening_nod: ListeningNod,
 
     // egui
     egui_ctx: egui::Context,
@@ -250,6 +348,8 @@ impl ApplicationHandler for App {
                 mouse_position: None,
                 start_time: Instant::now(),
                 ws_gaze: Arc::new(Mutex::new(WsGazeState::default())),
+                audio_state: Arc::new(Mutex::new(AudioState::default())),
+                listening_nod: ListeningNod::default(),
                 egui_ctx,
                 egui_state,
                 egui_renderer,
@@ -258,6 +358,9 @@ impl ApplicationHandler for App {
 
         // Start WebSocket server
         start_ws_server(state.ws_gaze.clone());
+
+        // Start audio capture
+        start_audio_capture(state.audio_state.clone());
 
         // Apply config from command-line argument if provided
         if let Some(path) = &self.config_path {
@@ -326,6 +429,15 @@ impl ApplicationHandler for App {
                     let time = state.start_time.elapsed().as_secs_f32();
                     let current_eyelid = state.left.uniforms.eyelid_close;
                     state.nod_animation.trigger(time, current_eyelid);
+                    state.window.request_redraw();
+                    return;
+                }
+                Key::Character(c) if c.as_str() == "l" => {
+                    state.listening_nod.toggle();
+                    log::info!(
+                        "Listening nod: {}",
+                        if state.listening_nod.enabled { "ON" } else { "OFF" }
+                    );
                     state.window.request_redraw();
                     return;
                 }
@@ -474,6 +586,21 @@ impl ApplicationHandler for App {
                 state.left.uniforms.convergence = convergence;
                 state.right.uniforms.convergence = convergence;
 
+                // Listening nod: trigger nod on detected speech pauses
+                if state.listening_nod.enabled {
+                    let rms = state
+                        .audio_state
+                        .lock()
+                        .map(|a| a.rms)
+                        .unwrap_or(0.0);
+                    if state.listening_nod.update(time, rms)
+                        && !state.nod_animation.is_active()
+                    {
+                        let current_eyelid = state.left.uniforms.eyelid_close;
+                        state.nod_animation.trigger(time, current_eyelid);
+                    }
+                }
+
                 // Nod animation: sets nod_pitch uniform and overrides eyelid_close
                 if let Some(nod_out) = state.nod_animation.evaluate(time) {
                     state.left.uniforms.nod_pitch = nod_out.nod_pitch;
@@ -541,6 +668,11 @@ impl ApplicationHandler for App {
                 let mut gui_actions = GuiActions::default();
                 let full_output = state.egui_ctx.run(raw_input, |ctx| {
                     if show_sidebar {
+                        let audio_rms = state
+                            .audio_state
+                            .lock()
+                            .map(|a| a.rms)
+                            .unwrap_or(0.0);
                         gui_actions = eye_control_panel(
                             ctx,
                             &mut state.left,
@@ -556,6 +688,8 @@ impl ApplicationHandler for App {
                             &mut state.show_eyelash,
                             &mut state.focus_distance,
                             &mut state.nod_animation,
+                            &mut state.listening_nod,
+                            audio_rms,
                             ws_active,
                         );
                     }
@@ -739,7 +873,7 @@ impl ApplicationHandler for App {
                 output.present();
 
                 // Only request next frame when animation is running
-                if state.auto_blink || ws_active || state.nod_animation.is_active() {
+                if state.auto_blink || ws_active || state.nod_animation.is_active() || state.listening_nod.enabled {
                     state.window.request_redraw();
                 }
             }

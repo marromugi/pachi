@@ -23,6 +23,7 @@ env_logger = "0.11"
 log = "0.4"
 rfd = "0.15"
 tungstenite = "0.26"
+cpal = "0.15"
 
 [[example]]
 name = "desktop"

@@ -1,5 +1,6 @@
 use egui;
 
+use crate::listening::ListeningNod;
 use crate::nod::NodAnimation;
 use crate::outline::{BezierAnchor, BezierOutline, EyelashShape, EyeShape, EyebrowShape, IrisShape, PupilShape};
 use crate::EyeUniforms;
@@ -161,6 +162,8 @@ pub fn eye_control_panel(
     show_eyelash: &mut bool,
     focus_distance: &mut f32,
     nod_animation: &mut NodAnimation,
+    listening_nod: &mut ListeningNod,
+    audio_rms: f32,
     ws_connected: bool,
 ) -> GuiActions {
     let mut actions = GuiActions::default();
@@ -580,6 +583,63 @@ pub fn eye_control_panel(
                                 .text("Pivot Y"),
                         );
                         nod_curve_editor(ui, &mut nod_animation.curve, "nod_curve");
+                    });
+
+                // --- Listening Nod ---
+                egui::CollapsingHeader::new("Listening")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.checkbox(&mut listening_nod.enabled, "Enable listening nod");
+                        ui.add(
+                            egui::Slider::new(&mut listening_nod.speech_threshold, 0.001..=0.2)
+                                .text("Threshold")
+                                .logarithmic(true),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut listening_nod.pause_delay, 0.1..=2.0)
+                                .text("Pause Delay (s)"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut listening_nod.cooldown, 0.5..=5.0)
+                                .text("Cooldown (s)"),
+                        );
+
+                        // RMS level meter
+                        ui.horizontal(|ui| {
+                            ui.label("Mic Level:");
+                            let bar_width = (ui.available_width() - 10.0).max(20.0);
+                            let (rect, _) = ui.allocate_exact_size(
+                                egui::vec2(bar_width, 14.0),
+                                egui::Sense::hover(),
+                            );
+                            let painter = ui.painter_at(rect);
+
+                            painter.rect_filled(rect, 2.0, egui::Color32::from_gray(40));
+
+                            let level = (audio_rms / listening_nod.speech_threshold.max(0.001))
+                                .clamp(0.0, 3.0)
+                                / 3.0;
+                            let fill_rect = egui::Rect::from_min_size(
+                                rect.min,
+                                egui::vec2(rect.width() * level, rect.height()),
+                            );
+                            let color = if audio_rms > listening_nod.speech_threshold {
+                                egui::Color32::from_rgb(100, 200, 100)
+                            } else {
+                                egui::Color32::from_rgb(80, 80, 180)
+                            };
+                            painter.rect_filled(fill_rect, 2.0, color);
+
+                            // Threshold marker
+                            let threshold_x = rect.min.x + rect.width() / 3.0;
+                            painter.line_segment(
+                                [
+                                    egui::pos2(threshold_x, rect.min.y),
+                                    egui::pos2(threshold_x, rect.max.y),
+                                ],
+                                egui::Stroke::new(1.0, egui::Color32::YELLOW),
+                            );
+                        });
                     });
 
                 ui.separator();
