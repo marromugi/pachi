@@ -480,11 +480,15 @@ impl ApplicationHandler for App {
                     state.right.uniforms.nod_pitch = nod_out.nod_pitch;
                     state.left.uniforms.nod_pivot_y = state.nod_animation.pivot_y;
                     state.right.uniforms.nod_pivot_y = state.nod_animation.pivot_y;
+                    state.left.uniforms.nod_sink = nod_out.nod_sink;
+                    state.right.uniforms.nod_sink = nod_out.nod_sink;
                     state.left.uniforms.eyelid_close = nod_out.eyelid_close;
                     state.right.uniforms.eyelid_close = nod_out.eyelid_close;
                 } else {
                     state.left.uniforms.nod_pitch = 0.0;
                     state.right.uniforms.nod_pitch = 0.0;
+                    state.left.uniforms.nod_sink = 0.0;
+                    state.right.uniforms.nod_sink = 0.0;
                 }
 
                 // Sync shapes into respective uniforms

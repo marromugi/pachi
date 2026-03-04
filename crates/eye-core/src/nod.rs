@@ -99,6 +99,8 @@ impl NodCurve {
 pub struct NodOutput {
     /// Face tilt angle in radians (>0 = forward nod).
     pub nod_pitch: f32,
+    /// Vertical sink offset (screen-space, >0 = downward).
+    pub nod_sink: f32,
     /// Eyelid close value (overrides normal eyelid state during nod).
     pub eyelid_close: f32,
 }
@@ -118,6 +120,8 @@ pub struct NodAnimation {
     pub curve: NodCurve,
     /// Maximum nod angle in radians (scales the curve output). 0.5 ≈ 28.6°.
     pub amount: f32,
+    /// Maximum vertical sink depth in screen-space units.
+    pub sink_depth: f32,
     /// Total duration of the nod in seconds.
     pub duration: f32,
     /// Eye closeness at the peak of the nod (middle point). 0.0 = fully open, 1.0 = fully closed.
@@ -135,6 +139,7 @@ impl Default for NodAnimation {
         Self {
             curve: NodCurve::default(),
             amount: 0.5,
+            sink_depth: 0.0,
             duration: 0.5,
             mid_closeness: 1.0,
             end_openness: 0.0,
@@ -181,6 +186,9 @@ impl NodAnimation {
         // Face tilt angle: amount is max angle in radians
         let nod_pitch = self.amount * curve_y;
 
+        // Vertical sink: same curve timing, scaled by sink_depth
+        let nod_sink = self.sink_depth * curve_y;
+
         // Eyelid close: linear interpolation independent of the bezier curve.
         // Segment 1 (0→mx): initial → mid_closeness
         // Segment 2 (mx→1): mid_closeness → end_openness
@@ -196,6 +204,7 @@ impl NodAnimation {
 
         Some(NodOutput {
             nod_pitch,
+            nod_sink,
             eyelid_close: eyelid_close.clamp(0.0, 1.0),
         })
     }

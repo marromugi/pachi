@@ -27,8 +27,8 @@
     ],
     "highlight_radius": 0.03,
     "highlight_intensity": 0.9,
-    "look_x": 0.24440104,
-    "look_y": -0.9414876,
+    "look_x": 0.24059896,
+    "look_y": -0.97612303,
     "eye_shape": {
       "open": {
         "anchors": [
@@ -250,7 +250,7 @@
         true,
         true
       ],
-      "base_y": 0.48,
+      "base_y": 0.47,
       "follow": 0.15,
       "color": [
         0.009,
@@ -414,8 +414,8 @@
     ],
     "highlight_radius": 0.03,
     "highlight_intensity": 0.9,
-    "look_x": 0.24440104,
-    "look_y": -0.9414876,
+    "look_x": 0.24059896,
+    "look_y": -0.97612303,
     "eye_shape": {
       "open": {
         "anchors": [
@@ -637,7 +637,7 @@
         true,
         true
       ],
-      "base_y": 0.48,
+      "base_y": 0.47,
       "follow": 0.15,
       "color": [
         0.009,
@@ -836,9 +836,10 @@
           }
         ]
       },
-      "amount": 0.93,
-      "duration": 0.35,
-      "mid_closeness": 1.0,
+      "amount": 0.73,
+      "sink_depth": 0.45,
+      "duration": 0.65,
+      "mid_closeness": 0.46,
       "end_openness": 0.2,
       "pivot_y": -0.45
     }

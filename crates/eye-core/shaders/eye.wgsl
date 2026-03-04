@@ -36,6 +36,12 @@ struct Uniforms {
     nod_pitch: f32,
     nod_pivot_y: f32,
 
+    // Nod sink (16 bytes)
+    nod_sink: f32,
+    _pad_nod_a: f32,
+    _pad_nod_b: f32,
+    _pad_nod_c: f32,
+
     // Bezier outline: open state (128 bytes)
     // 4 segments × 2 vec4f. Each vec4f packs 2 vec2f control points.
     outline_open: array<vec4f, 8>,
@@ -488,6 +494,9 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
             pivot + u_val
         );
     }
+
+    // --- Nod sink: vertical displacement during nod ---
+    p.y += g.nod_sink;
 
     var color = g.bg_color;
 

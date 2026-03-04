@@ -113,6 +113,8 @@ pub struct NodCurveConfig {
 pub struct NodConfig {
     pub curve: NodCurveConfig,
     pub amount: f32,
+    #[serde(default)]
+    pub sink_depth: f32,
     pub duration: f32,
     #[serde(default = "default_mid_closeness")]
     pub mid_closeness: f32,
@@ -135,6 +137,7 @@ impl Default for NodConfig {
         Self {
             curve: NodCurveConfig::from(&nod.curve),
             amount: nod.amount,
+            sink_depth: nod.sink_depth,
             duration: nod.duration,
             mid_closeness: nod.mid_closeness,
             end_openness: nod.end_openness,
@@ -172,6 +175,7 @@ impl From<&NodAnimation> for NodConfig {
         Self {
             curve: NodCurveConfig::from(&a.curve),
             amount: a.amount,
+            sink_depth: a.sink_depth,
             duration: a.duration,
             mid_closeness: a.mid_closeness,
             end_openness: a.end_openness,
@@ -184,6 +188,7 @@ impl NodConfig {
     pub fn apply_to(&self, a: &mut NodAnimation) {
         a.curve = NodCurve::from(&self.curve);
         a.amount = self.amount;
+        a.sink_depth = self.sink_depth;
         a.duration = self.duration;
         a.mid_closeness = self.mid_closeness;
         a.end_openness = self.end_openness;

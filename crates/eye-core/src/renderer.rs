@@ -42,41 +42,45 @@ pub struct EyeUniforms {
     pub nod_pitch: f32,              // offset 104 | nod tilt angle (radians, >0 = forward)
     pub nod_pivot_y: f32,            // offset 108 | nod rotation pivot Y (screen space)
 
-    // -- Bezier outline open -- (128 bytes, offset 112)
+    // -- Nod sink -- (16 bytes, offset 112)
+    pub nod_sink: f32,               // offset 112 | vertical sink offset (screen space)
+    pub _pad_nod: [f32; 3],          // offset 116 | padding to 16-byte boundary
+
+    // -- Bezier outline open -- (128 bytes, offset 128)
     // 4 segments x 2 vec4f each. Each vec4f packs 2 vec2f control points.
     // seg[i*2]   = (P0.xy, P1.xy) = (anchor, anchor+handle_out)
     // seg[i*2+1] = (P2.xy, P3.xy) = (next_anchor+handle_in, next_anchor)
     pub outline_open: [[f32; 4]; 8],
 
-    // -- Bezier outline closed -- (128 bytes, offset 240)
+    // -- Bezier outline closed -- (128 bytes, offset 256)
     pub outline_closed: [[f32; 4]; 8],
 
-    // -- Eyebrow -- (224 bytes, offset 368)
-    pub eyebrow_color: [f32; 3],         // offset 368 | vec3f
-    pub eyebrow_base_y: f32,             // offset 380 | base Y position above eye
-    pub eyebrow_follow: f32,             // offset 384 | eyelid follow rate
-    pub _pad_eyebrow: [f32; 3],          // offset 388 | padding to 16-byte boundary
-    pub eyebrow_outline: [[f32; 4]; 12], // offset 400 | 6-segment Bezier control points
+    // -- Eyebrow -- (224 bytes, offset 384)
+    pub eyebrow_color: [f32; 3],         // offset 384 | vec3f
+    pub eyebrow_base_y: f32,             // offset 396 | base Y position above eye
+    pub eyebrow_follow: f32,             // offset 400 | eyelid follow rate
+    pub _pad_eyebrow: [f32; 3],          // offset 404 | padding to 16-byte boundary
+    pub eyebrow_outline: [[f32; 4]; 12], // offset 416 | 6-segment Bezier control points
 
-    // -- Eyelash -- (16 bytes, offset 592)
+    // -- Eyelash -- (16 bytes, offset 608)
     // Rendered as a stroke on the upper eye outline (no separate shape).
-    pub eyelash_color: [f32; 3],         // offset 592 | vec3f
-    pub eyelash_thickness: f32,          // offset 604 | stroke thickness
+    pub eyelash_color: [f32; 3],         // offset 608 | vec3f
+    pub eyelash_thickness: f32,          // offset 620 | stroke thickness
 
-    // -- Pupil -- (16 bytes, offset 608)
-    pub pupil_color: [f32; 3],           // offset 608 | vec3f
-    pub pupil_radius: f32,              // offset 620 | pupil circle radius (used for reset)
+    // -- Pupil -- (16 bytes, offset 624)
+    pub pupil_color: [f32; 3],           // offset 624 | vec3f
+    pub pupil_radius: f32,              // offset 636 | pupil circle radius (used for reset)
 
-    // -- Iris Bezier outline -- (128 bytes, offset 624)
+    // -- Iris Bezier outline -- (128 bytes, offset 640)
     // 4 segments x 2 vec4f each. Same layout as outline_open/closed.
     pub iris_outline: [[f32; 4]; 8],
 
-    // -- Pupil Bezier outline -- (128 bytes, offset 752)
+    // -- Pupil Bezier outline -- (128 bytes, offset 768)
     pub pupil_outline: [[f32; 4]; 8],
 }
-// Total: 880 bytes (= 16 * 55)
+// Total: 896 bytes (= 16 * 56)
 
-const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 880);
+const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 896);
 
 /// Paired uniform structure: one set per eye.
 /// The shader reads `pair.left` for the left eye and `pair.right` for the right eye.
@@ -90,7 +94,7 @@ pub struct EyePairUniforms {
 }
 // Total: 1120 bytes (= 560 * 2)
 
-const _: () = assert!(std::mem::size_of::<EyePairUniforms>() == 1760);
+const _: () = assert!(std::mem::size_of::<EyePairUniforms>() == 1792);
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -125,6 +129,10 @@ impl Default for EyeUniforms {
             iris_offset_y: -0.02,
             nod_pitch: 0.0,
             nod_pivot_y: -1.0,
+
+            // Nod sink
+            nod_sink: 0.0,
+            _pad_nod: [0.0, 0.0, 0.0],
 
             // Bezier outline
             outline_open: BezierOutline::ellipse(0.28, 0.35).to_uniform_array(),

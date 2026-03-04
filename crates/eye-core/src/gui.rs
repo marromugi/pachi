@@ -560,6 +560,10 @@ pub fn eye_control_panel(
                                 .text("Amount"),
                         );
                         ui.add(
+                            egui::Slider::new(&mut nod_animation.sink_depth, 0.0..=1.0)
+                                .text("Sink Depth"),
+                        );
+                        ui.add(
                             egui::Slider::new(&mut nod_animation.duration, 0.1..=3.0)
                                 .text("Duration (s)"),
                         );
