@@ -75,7 +75,7 @@ impl MicrosaccadeAnimation {
         };
 
         // Very small amplitude in screen space (iris_follow ≈ 0.14, so this is tiny)
-        let amplitude = self.rng.range(0.028, 0.032);
+        let amplitude = self.rng.range(0.024, 0.028);
         let duration = self.rng.range(0.03, 0.06);
 
         let to_x = dx * amplitude;

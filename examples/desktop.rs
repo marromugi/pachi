@@ -547,6 +547,11 @@ impl ApplicationHandler for App {
                             state.left.uniforms.look_y = ws.look_y;
                             state.right.uniforms.look_x = ws.look_x;
                             state.right.uniforms.look_y = ws.look_y;
+                            // Sync head orientation with gaze
+                            state.left.uniforms.head_yaw = ws.look_x;
+                            state.left.uniforms.head_pitch = ws.look_y;
+                            state.right.uniforms.head_yaw = ws.look_x;
+                            state.right.uniforms.head_pitch = ws.look_y;
                             state.focus_distance = ws.focus_distance;
                             if let Some(ec) = ws.eyelid_close {
                                 state.left.uniforms.eyelid_close = ec;
@@ -571,6 +576,11 @@ impl ApplicationHandler for App {
                         state.left.uniforms.look_y = look_y;
                         state.right.uniforms.look_x = look_x;
                         state.right.uniforms.look_y = look_y;
+                        // Sync head orientation with gaze
+                        state.left.uniforms.head_yaw = look_x;
+                        state.left.uniforms.head_pitch = look_y;
+                        state.right.uniforms.head_yaw = look_x;
+                        state.right.uniforms.head_pitch = look_y;
                     }
                 }
 
@@ -678,6 +688,8 @@ impl ApplicationHandler for App {
                 state.right.uniforms.eye_separation = state.left.uniforms.eye_separation;
                 state.right.uniforms.max_angle = state.left.uniforms.max_angle;
                 state.right.uniforms.eye_angle = state.left.uniforms.eye_angle;
+                state.right.uniforms.head_yaw = state.left.uniforms.head_yaw;
+                state.right.uniforms.head_pitch = state.left.uniforms.head_pitch;
 
                 // --- egui frame ---
                 let raw_input = state.egui_state.take_egui_input(&state.window);

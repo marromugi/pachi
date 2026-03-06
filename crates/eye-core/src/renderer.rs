@@ -46,9 +46,13 @@ pub struct EyeUniforms {
     pub nod_sink: f32,               // offset 112 | vertical sink offset (screen space)
     pub microsaccade_x: f32,         // offset 116 | iris-only horizontal offset
     pub microsaccade_y: f32,         // offset 120 | iris-only vertical offset
-    pub _pad_nod: f32,               // offset 124 | padding to 16-byte boundary
+    pub head_yaw: f32,               // offset 124 | [-1, 1] head horizontal orientation
 
-    // -- Bezier outline open -- (128 bytes, offset 128)
+    // -- Head orientation -- (16 bytes, offset 128)
+    pub head_pitch: f32,             // offset 128 | [-1, 1] head vertical orientation
+    pub _pad_head: [f32; 3],         // offset 132 | padding to 16-byte boundary
+
+    // -- Bezier outline open -- (128 bytes, offset 144)
     // 4 segments x 2 vec4f each. Each vec4f packs 2 vec2f control points.
     // seg[i*2]   = (P0.xy, P1.xy) = (anchor, anchor+handle_out)
     // seg[i*2+1] = (P2.xy, P3.xy) = (next_anchor+handle_in, next_anchor)
@@ -80,9 +84,9 @@ pub struct EyeUniforms {
     // -- Pupil Bezier outline -- (128 bytes, offset 768)
     pub pupil_outline: [[f32; 4]; 8],
 }
-// Total: 896 bytes (= 16 * 56)
+// Total: 912 bytes (= 16 * 57)
 
-const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 896);
+const _: () = assert!(std::mem::size_of::<EyeUniforms>() == 912);
 
 /// Paired uniform structure: one set per eye.
 /// The shader reads `pair.left` for the left eye and `pair.right` for the right eye.
@@ -96,7 +100,7 @@ pub struct EyePairUniforms {
 }
 // Total: 1120 bytes (= 560 * 2)
 
-const _: () = assert!(std::mem::size_of::<EyePairUniforms>() == 1792);
+const _: () = assert!(std::mem::size_of::<EyePairUniforms>() == 1824);
 
 impl Default for EyeUniforms {
     fn default() -> Self {
@@ -136,7 +140,11 @@ impl Default for EyeUniforms {
             nod_sink: 0.0,
             microsaccade_x: 0.0,
             microsaccade_y: 0.0,
-            _pad_nod: 0.0,
+            head_yaw: 0.0,
+
+            // Head orientation
+            head_pitch: 0.0,
+            _pad_head: [0.0, 0.0, 0.0],
 
             // Bezier outline
             outline_open: BezierOutline::ellipse(0.28, 0.35).to_uniform_array(),

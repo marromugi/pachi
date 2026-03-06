@@ -40,7 +40,13 @@ struct Uniforms {
     nod_sink: f32,
     microsaccade_x: f32,
     microsaccade_y: f32,
-    _pad_nod_c: f32,
+    head_yaw: f32,
+
+    // Head orientation (16 bytes)
+    head_pitch: f32,
+    _pad_head_a: f32,
+    _pad_head_b: f32,
+    _pad_head_c: f32,
 
     // Bezier outline: open state (128 bytes)
     // 4 segments × 2 vec4f. Each vec4f packs 2 vec2f control points.
@@ -502,8 +508,8 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4f {
 
     // --- Sphere projection model ---
     // Eyes are decals on a virtual sphere. Rotation causes foreshortening.
-    let yaw   = g.look_x * g.max_angle;
-    let pitch = g.look_y * g.max_angle * g.aspect_ratio * 0.65;
+    let yaw   = g.head_yaw * g.max_angle;
+    let pitch = g.head_pitch * g.max_angle * g.aspect_ratio * 0.65;
 
     // Angular half-separation of eyes on the sphere
     let half_sep = clamp(g.eye_angle, 0.01, 1.5);

@@ -245,6 +245,24 @@ pub fn eye_control_panel(
                             }
                         }
 
+                        // Head orientation (always global, always synced L→R)
+                        ui.separator();
+                        {
+                            let head_follow_active = *follow_mouse || ws_connected;
+                            ui.add_enabled(
+                                !head_follow_active,
+                                egui::Slider::new(&mut left.uniforms.head_yaw, -1.0..=1.0)
+                                    .text("Head Yaw"),
+                            );
+                            ui.add_enabled(
+                                !head_follow_active,
+                                egui::Slider::new(&mut left.uniforms.head_pitch, -1.0..=1.0)
+                                    .text("Head Pitch"),
+                            );
+                            right.uniforms.head_yaw = left.uniforms.head_yaw;
+                            right.uniforms.head_pitch = left.uniforms.head_pitch;
+                        }
+
                         // Global params (always edit left, sync to right)
                         ui.add(
                             egui::Slider::new(&mut left.uniforms.max_angle, 0.0..=1.5)
