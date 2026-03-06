@@ -1,13 +1,13 @@
 #[derive(Clone, Copy)]
 #[allow(dead_code)]
-enum Easing {
+pub enum Easing {
     Linear,
     EaseIn,
     EaseOut,
     EaseInOut,
 }
 
-fn apply_easing(t: f32, easing: Easing) -> f32 {
+pub fn apply_easing(t: f32, easing: Easing) -> f32 {
     match easing {
         Easing::Linear => t,
         Easing::EaseIn => t * t,
@@ -23,19 +23,19 @@ fn apply_easing(t: f32, easing: Easing) -> f32 {
 }
 
 /// Lightweight xorshift32 PRNG (no external crate needed).
-struct Xorshift32 {
+pub struct Xorshift32 {
     state: u32,
 }
 
 impl Xorshift32 {
-    fn new(seed: u32) -> Self {
+    pub fn new(seed: u32) -> Self {
         Self {
             state: if seed == 0 { 1 } else { seed },
         }
     }
 
     /// Returns a pseudo-random u32.
-    fn next_u32(&mut self) -> u32 {
+    pub fn next_u32(&mut self) -> u32 {
         let mut x = self.state;
         x ^= x << 13;
         x ^= x >> 17;
@@ -45,12 +45,12 @@ impl Xorshift32 {
     }
 
     /// Returns a pseudo-random f32 in [0, 1).
-    fn next_f32(&mut self) -> f32 {
+    pub fn next_f32(&mut self) -> f32 {
         (self.next_u32() & 0x00FF_FFFF) as f32 / 16_777_216.0
     }
 
     /// Returns a pseudo-random f32 in [lo, hi).
-    fn range(&mut self, lo: f32, hi: f32) -> f32 {
+    pub fn range(&mut self, lo: f32, hi: f32) -> f32 {
         lo + self.next_f32() * (hi - lo)
     }
 }

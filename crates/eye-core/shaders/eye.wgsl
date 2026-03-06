@@ -36,10 +36,10 @@ struct Uniforms {
     nod_pitch: f32,
     nod_pivot_y: f32,
 
-    // Nod sink (16 bytes)
+    // Nod sink + Microsaccade (16 bytes)
     nod_sink: f32,
-    _pad_nod_a: f32,
-    _pad_nod_b: f32,
+    microsaccade_x: f32,
+    microsaccade_y: f32,
     _pad_nod_c: f32,
 
     // Bezier outline: open state (128 bytes)
@@ -432,10 +432,10 @@ fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32, rest_h_scale: f
     // --- Compose eye content ---
     var eye_color = u.sclera_color;
 
-    // --- Iris (follows gaze) ---
+    // --- Iris (follows gaze + microsaccade) ---
     let iris_offset = vec2f(
-        mirror * u.look_x * u.iris_follow + u.convergence,
-        u.look_y * u.iris_follow + u.iris_offset_y
+        mirror * (u.look_x * u.iris_follow + u.microsaccade_x) + u.convergence,
+        u.look_y * u.iris_follow + u.iris_offset_y + u.microsaccade_y
     );
     let iris_p = sq_p - iris_offset;
     // Correct iris/pupil query coords: multiply x by rest_h_scale to cancel

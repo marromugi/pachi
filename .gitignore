@@ -1,2 +1,4 @@
 target
 *eye.json
+eye_config_*.json
+docs/**

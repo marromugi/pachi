@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use eye::gui::{eye_control_panel, EyeSideState, GuiActions, SectionLink};
-use eye::{BlinkAnimation, EyeConfig, EyePairUniforms, EyeRenderer, ListeningNod, NodAnimation};
+use eye::{BlinkAnimation, EyeConfig, EyePairUniforms, EyeRenderer, ListeningNod, MicrosaccadeAnimation, NodAnimation};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -226,6 +226,7 @@ struct AppState {
 
     blink_animation: BlinkAnimation,
     nod_animation: NodAnimation,
+    microsaccade_animation: MicrosaccadeAnimation,
     auto_blink: bool,
     follow_mouse: bool,
     show_highlight: bool,
@@ -338,6 +339,7 @@ impl ApplicationHandler for App {
                 link_eyelash: SectionLink::default(),
                 blink_animation: BlinkAnimation::sample(),
                 nod_animation: NodAnimation::default(),
+                microsaccade_animation: MicrosaccadeAnimation::new(7),
                 auto_blink: true,
                 follow_mouse: true,
                 show_highlight: true,
@@ -429,6 +431,14 @@ impl ApplicationHandler for App {
                     let time = state.start_time.elapsed().as_secs_f32();
                     let current_eyelid = state.left.uniforms.eyelid_close;
                     state.nod_animation.trigger(time, current_eyelid);
+                    state.window.request_redraw();
+                    return;
+                }
+                Key::Character(c) if c.as_str() == "s" => {
+                    let time = state.start_time.elapsed().as_secs_f32();
+                    let look_x = state.left.uniforms.look_x;
+                    let look_y = state.left.uniforms.look_y;
+                    state.microsaccade_animation.trigger(time, look_x, look_y);
                     state.window.request_redraw();
                     return;
                 }
@@ -563,6 +573,13 @@ impl ApplicationHandler for App {
                         state.right.uniforms.look_y = look_y;
                     }
                 }
+
+                // Microsaccade: iris-only offset (both eyes same direction)
+                let (ms_x, ms_y) = state.microsaccade_animation.evaluate(time);
+                state.left.uniforms.microsaccade_x = ms_x;
+                state.right.uniforms.microsaccade_x = ms_x;
+                state.left.uniforms.microsaccade_y = ms_y;
+                state.right.uniforms.microsaccade_y = ms_y;
 
                 // Focus distance → convergence offset (global)
                 // Physical eye separation on screen scales with window size.

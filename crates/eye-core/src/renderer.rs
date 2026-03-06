@@ -42,9 +42,11 @@ pub struct EyeUniforms {
     pub nod_pitch: f32,              // offset 104 | nod tilt angle (radians, >0 = forward)
     pub nod_pivot_y: f32,            // offset 108 | nod rotation pivot Y (screen space)
 
-    // -- Nod sink -- (16 bytes, offset 112)
+    // -- Nod sink + Microsaccade -- (16 bytes, offset 112)
     pub nod_sink: f32,               // offset 112 | vertical sink offset (screen space)
-    pub _pad_nod: [f32; 3],          // offset 116 | padding to 16-byte boundary
+    pub microsaccade_x: f32,         // offset 116 | iris-only horizontal offset
+    pub microsaccade_y: f32,         // offset 120 | iris-only vertical offset
+    pub _pad_nod: f32,               // offset 124 | padding to 16-byte boundary
 
     // -- Bezier outline open -- (128 bytes, offset 128)
     // 4 segments x 2 vec4f each. Each vec4f packs 2 vec2f control points.
@@ -130,9 +132,11 @@ impl Default for EyeUniforms {
             nod_pitch: 0.0,
             nod_pivot_y: -1.0,
 
-            // Nod sink
+            // Nod sink + Microsaccade
             nod_sink: 0.0,
-            _pad_nod: [0.0, 0.0, 0.0],
+            microsaccade_x: 0.0,
+            microsaccade_y: 0.0,
+            _pad_nod: 0.0,
 
             // Bezier outline
             outline_open: BezierOutline::ellipse(0.28, 0.35).to_uniform_array(),
