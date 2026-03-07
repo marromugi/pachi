@@ -234,6 +234,7 @@ struct AppState {
     show_eyebrow: bool,
     show_eyelash: bool,
     show_sidebar: bool,
+    pause_animation: bool,
     focus_distance: f32,
     mouse_position: Option<winit::dpi::PhysicalPosition<f64>>,
     start_time: Instant,
@@ -348,6 +349,7 @@ impl ApplicationHandler for App {
                 show_eyebrow: true,
                 show_eyelash: true,
                 show_sidebar: true,
+                pause_animation: false,
                 focus_distance: 1.5,
                 mouse_position: None,
                 start_time: Instant::now(),
@@ -529,8 +531,8 @@ impl ApplicationHandler for App {
                 state.right.uniforms.aspect_ratio = aspect;
                 state.right.uniforms.time = time;
 
-                // Auto-blink: applies to both eyes
-                if state.auto_blink {
+                // Auto-blink: applies to both eyes (skip when paused)
+                if state.auto_blink && !state.pause_animation {
                     let eyelid_now = state.blink_animation.evaluate(time);
 
                     // Squash & stretch driven by eyelid velocity
@@ -599,11 +601,13 @@ impl ApplicationHandler for App {
                 }
 
                 // Microsaccade: iris-only offset (both eyes same direction)
-                let (ms_x, ms_y) = state.microsaccade_animation.evaluate(time);
-                state.left.uniforms.microsaccade_x = ms_x;
-                state.right.uniforms.microsaccade_x = ms_x;
-                state.left.uniforms.microsaccade_y = ms_y;
-                state.right.uniforms.microsaccade_y = ms_y;
+                if !state.pause_animation {
+                    let (ms_x, ms_y) = state.microsaccade_animation.evaluate(time);
+                    state.left.uniforms.microsaccade_x = ms_x;
+                    state.right.uniforms.microsaccade_x = ms_x;
+                    state.left.uniforms.microsaccade_y = ms_y;
+                    state.right.uniforms.microsaccade_y = ms_y;
+                }
 
                 // Focus distance → convergence offset (global)
                 // Physical eye separation on screen scales with window size.
@@ -627,36 +631,38 @@ impl ApplicationHandler for App {
                 state.left.uniforms.convergence = convergence;
                 state.right.uniforms.convergence = convergence;
 
-                // Listening nod: trigger nod on detected speech pauses
-                if state.listening_nod.enabled {
-                    let rms = state
-                        .audio_state
-                        .lock()
-                        .map(|a| a.rms)
-                        .unwrap_or(0.0);
-                    if state.listening_nod.update(time, rms)
-                        && !state.nod_animation.is_active()
-                    {
-                        let current_eyelid = state.left.uniforms.eyelid_close;
-                        state.nod_animation.trigger(time, current_eyelid);
+                if !state.pause_animation {
+                    // Listening nod: trigger nod on detected speech pauses
+                    if state.listening_nod.enabled {
+                        let rms = state
+                            .audio_state
+                            .lock()
+                            .map(|a| a.rms)
+                            .unwrap_or(0.0);
+                        if state.listening_nod.update(time, rms)
+                            && !state.nod_animation.is_active()
+                        {
+                            let current_eyelid = state.left.uniforms.eyelid_close;
+                            state.nod_animation.trigger(time, current_eyelid);
+                        }
                     }
-                }
 
-                // Nod animation: sets nod_pitch uniform and overrides eyelid_close
-                if let Some(nod_out) = state.nod_animation.evaluate(time) {
-                    state.left.uniforms.nod_pitch = nod_out.nod_pitch;
-                    state.right.uniforms.nod_pitch = nod_out.nod_pitch;
-                    state.left.uniforms.nod_pivot_y = state.nod_animation.pivot_y;
-                    state.right.uniforms.nod_pivot_y = state.nod_animation.pivot_y;
-                    state.left.uniforms.nod_sink = nod_out.nod_sink;
-                    state.right.uniforms.nod_sink = nod_out.nod_sink;
-                    state.left.uniforms.eyelid_close = nod_out.eyelid_close;
-                    state.right.uniforms.eyelid_close = nod_out.eyelid_close;
-                } else {
-                    state.left.uniforms.nod_pitch = 0.0;
-                    state.right.uniforms.nod_pitch = 0.0;
-                    state.left.uniforms.nod_sink = 0.0;
-                    state.right.uniforms.nod_sink = 0.0;
+                    // Nod animation: sets nod_pitch uniform and overrides eyelid_close
+                    if let Some(nod_out) = state.nod_animation.evaluate(time) {
+                        state.left.uniforms.nod_pitch = nod_out.nod_pitch;
+                        state.right.uniforms.nod_pitch = nod_out.nod_pitch;
+                        state.left.uniforms.nod_pivot_y = state.nod_animation.pivot_y;
+                        state.right.uniforms.nod_pivot_y = state.nod_animation.pivot_y;
+                        state.left.uniforms.nod_sink = nod_out.nod_sink;
+                        state.right.uniforms.nod_sink = nod_out.nod_sink;
+                        state.left.uniforms.eyelid_close = nod_out.eyelid_close;
+                        state.right.uniforms.eyelid_close = nod_out.eyelid_close;
+                    } else {
+                        state.left.uniforms.nod_pitch = 0.0;
+                        state.right.uniforms.nod_pitch = 0.0;
+                        state.left.uniforms.nod_sink = 0.0;
+                        state.right.uniforms.nod_sink = 0.0;
+                    }
                 }
 
                 // Sync shapes into respective uniforms
@@ -730,6 +736,7 @@ impl ApplicationHandler for App {
                             &mut state.show_highlight,
                             &mut state.show_eyebrow,
                             &mut state.show_eyelash,
+                            &mut state.pause_animation,
                             &mut state.focus_distance,
                             &mut state.nod_animation,
                             &mut state.listening_nod,
@@ -918,8 +925,10 @@ impl ApplicationHandler for App {
                 state.queue.submit(std::iter::once(encoder.finish()));
                 output.present();
 
-                // Only request next frame when animation is running
-                if state.auto_blink || ws_active || state.nod_animation.is_active() || state.listening_nod.enabled {
+                // Only request next frame when animation is running and not paused
+                if !state.pause_animation
+                    && (state.auto_blink || ws_active || state.nod_animation.is_active() || state.listening_nod.enabled)
+                {
                     state.window.request_redraw();
                 }
             }

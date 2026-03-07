@@ -168,6 +168,7 @@ pub fn eye_control_panel(
     show_highlight: &mut bool,
     show_eyebrow: &mut bool,
     show_eyelash: &mut bool,
+    pause_animation: &mut bool,
     focus_distance: &mut f32,
     nod_animation: &mut NodAnimation,
     listening_nod: &mut ListeningNod,
@@ -206,6 +207,7 @@ pub fn eye_control_panel(
                     }
                 }
                 ui.checkbox(auto_blink, "Auto Blink");
+                ui.checkbox(pause_animation, "Pause Animation");
 
                 ui.separator();
 
