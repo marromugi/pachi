@@ -50,7 +50,8 @@ pub struct EyeUniforms {
 
     // -- Head orientation -- (16 bytes, offset 128)
     pub head_pitch: f32,             // offset 128 | [-1, 1] head vertical orientation
-    pub _pad_head: [f32; 3],         // offset 132 | padding to 16-byte boundary
+    pub highlight_blur: f32,         // offset 132 | highlight edge softness (0 = sharp)
+    pub _pad_head: [f32; 2],         // offset 136 | padding to 16-byte boundary
 
     // -- Bezier outline open -- (128 bytes, offset 144)
     // 4 segments x 2 vec4f each. Each vec4f packs 2 vec2f control points.
@@ -144,7 +145,8 @@ impl Default for EyeUniforms {
 
             // Head orientation
             head_pitch: 0.0,
-            _pad_head: [0.0, 0.0, 0.0],
+            highlight_blur: 0.0,
+            _pad_head: [0.0, 0.0],
 
             // Bezier outline
             outline_open: BezierOutline::ellipse(0.28, 0.35).to_uniform_array(),

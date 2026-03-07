@@ -223,6 +223,7 @@ struct AppState {
     link_iris: SectionLink,
     link_eyebrow: SectionLink,
     link_eyelash: SectionLink,
+    link_highlight: SectionLink,
 
     blink_animation: BlinkAnimation,
     nod_animation: NodAnimation,
@@ -337,6 +338,7 @@ impl ApplicationHandler for App {
                 link_iris: SectionLink::default(),
                 link_eyebrow: SectionLink::default(),
                 link_eyelash: SectionLink::default(),
+                link_highlight: SectionLink::default(),
                 blink_animation: BlinkAnimation::sample(),
                 nod_animation: NodAnimation::default(),
                 microsaccade_animation: MicrosaccadeAnimation::new(7),
@@ -376,6 +378,7 @@ impl ApplicationHandler for App {
                             &mut state.link_iris,
                             &mut state.link_eyebrow,
                             &mut state.link_eyelash,
+                            &mut state.link_highlight,
                             &mut state.auto_blink,
                             &mut state.follow_mouse,
                             &mut state.show_highlight,
@@ -404,7 +407,30 @@ impl ApplicationHandler for App {
             return;
         };
 
-        // Intercept shortcut keys before egui consumes them
+        // Intercept Tab before egui (sidebar toggle)
+        if let WindowEvent::KeyboardInput {
+            event:
+                KeyEvent {
+                    logical_key: Key::Named(NamedKey::Tab),
+                    state: ElementState::Pressed,
+                    ..
+                },
+            ..
+        } = &event
+        {
+            state.show_sidebar = !state.show_sidebar;
+            state.window.request_redraw();
+            return;
+        }
+
+        // Pass events to egui first so Bezier editors can consume S/G/R/A keys
+        let egui_response = state.egui_state.on_window_event(&state.window, &event);
+        if egui_response.consumed {
+            state.window.request_redraw();
+            return;
+        }
+
+        // Shortcut keys (only when egui didn't consume the event)
         if let WindowEvent::KeyboardInput {
             event:
                 KeyEvent {
@@ -416,11 +442,6 @@ impl ApplicationHandler for App {
         } = &event
         {
             match logical_key {
-                Key::Named(NamedKey::Tab) => {
-                    state.show_sidebar = !state.show_sidebar;
-                    state.window.request_redraw();
-                    return;
-                }
                 Key::Character(c) if c.as_str() == "b" => {
                     let time = state.start_time.elapsed().as_secs_f32();
                     state.blink_animation.trigger(time);
@@ -453,13 +474,6 @@ impl ApplicationHandler for App {
                 }
                 _ => {}
             }
-        }
-
-        // Pass events to egui first
-        let egui_response = state.egui_state.on_window_event(&state.window, &event);
-        if egui_response.consumed {
-            state.window.request_redraw();
-            return;
         }
 
         match event {
@@ -710,6 +724,7 @@ impl ApplicationHandler for App {
                             &mut state.link_iris,
                             &mut state.link_eyebrow,
                             &mut state.link_eyelash,
+                            &mut state.link_highlight,
                             &mut state.auto_blink,
                             &mut state.follow_mouse,
                             &mut state.show_highlight,
@@ -738,6 +753,7 @@ impl ApplicationHandler for App {
                         &state.link_iris,
                         &state.link_eyebrow,
                         &state.link_eyelash,
+                        &state.link_highlight,
                         state.auto_blink,
                         state.follow_mouse,
                         state.show_highlight,
@@ -776,6 +792,7 @@ impl ApplicationHandler for App {
                                         &mut state.link_iris,
                                         &mut state.link_eyebrow,
                                         &mut state.link_eyelash,
+                                        &mut state.link_highlight,
                                         &mut state.auto_blink,
                                         &mut state.follow_mouse,
                                         &mut state.show_highlight,

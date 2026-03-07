@@ -44,7 +44,7 @@ struct Uniforms {
 
     // Head orientation (16 bytes)
     head_pitch: f32,
-    _pad_head_a: f32,
+    highlight_blur: f32,
     _pad_head_b: f32,
     _pad_head_c: f32,
 
@@ -462,8 +462,8 @@ fn render_eye(p: vec2f, mirror: f32, h_scale: f32, v_scale: f32, rest_h_scale: f
     let look_shift = vec2f(u.look_x * 0.05, u.look_y * 0.05);
     let hl_p = outline_p - u.highlight_offset - look_shift;
     let d_hl = sd_circle(hl_p, u.highlight_radius);
-    let aa_h = fwidth(d_hl) * 0.5;
-    let hl_mask = 1.0 - smoothstep(-aa_h, aa_h, d_hl);
+    let blur_h = max(fwidth(d_hl) * 0.5, u.highlight_blur);
+    let hl_mask = 1.0 - smoothstep(-blur_h, blur_h, d_hl);
     eye_color = eye_color + vec3f(u.highlight_intensity * hl_mask);
 
     return vec4f(eye_color, outline_mask);

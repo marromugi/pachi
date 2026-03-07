@@ -97,6 +97,13 @@ fn sync_eyelash(from: &EyeSideState, to: &mut EyeSideState) {
     to.eyelash_shape = from.eyelash_shape.clone();
 }
 
+fn sync_highlight(from: &EyeSideState, to: &mut EyeSideState) {
+    to.uniforms.highlight_offset = from.uniforms.highlight_offset;
+    to.uniforms.highlight_radius = from.uniforms.highlight_radius;
+    to.uniforms.highlight_intensity = from.uniforms.highlight_intensity;
+    to.uniforms.highlight_blur = from.uniforms.highlight_blur;
+}
+
 /// Apply a section sync based on which side was active before re-linking.
 fn apply_relink(
     from_side: Side,
@@ -155,6 +162,7 @@ pub fn eye_control_panel(
     link_iris: &mut SectionLink,
     link_eyebrow: &mut SectionLink,
     link_eyelash: &mut SectionLink,
+    link_highlight: &mut SectionLink,
     auto_blink: &mut bool,
     follow_mouse: &mut bool,
     show_highlight: &mut bool,
@@ -384,6 +392,133 @@ pub fn eye_control_panel(
 
                 ui.separator();
 
+                // --- Highlight ---
+                egui::CollapsingHeader::new("Highlight")
+                    .default_open(false)
+                    .show(ui, |ui| {
+                        ui.checkbox(show_highlight, "Show Highlight");
+
+                        if let Some(from) = section_eye_selector(ui, link_highlight) {
+                            apply_relink(from, left, right, sync_highlight);
+                        }
+
+                        let editing_left =
+                            link_highlight.linked || link_highlight.active == Side::Left;
+                        let u = if editing_left {
+                            &mut left.uniforms
+                        } else {
+                            &mut right.uniforms
+                        };
+
+                        ui.add(
+                            egui::Slider::new(&mut u.highlight_radius, 0.005..=0.15)
+                                .text("Radius"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut u.highlight_intensity, 0.0..=1.0)
+                                .text("Intensity"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut u.highlight_blur, 0.0..=0.15)
+                                .text("Blur"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut u.highlight_offset[0], -0.20..=0.20)
+                                .text("Offset X"),
+                        );
+                        ui.add(
+                            egui::Slider::new(&mut u.highlight_offset[1], -0.20..=0.20)
+                                .text("Offset Y"),
+                        );
+
+                        // Save values before dropping the mutable borrow
+                        let hl_offset = u.highlight_offset;
+                        let hl_radius = u.highlight_radius;
+                        let iris_radius = u.iris_radius;
+
+                        // --- Highlight position preview (zoomed-in) ---
+                        ui.separator();
+                        ui.label("Position");
+                        let available_width = ui.available_width();
+                        let size = available_width.min(300.0);
+                        let (response, painter) = ui.allocate_painter(
+                            egui::vec2(size, size),
+                            egui::Sense::click_and_drag(),
+                        );
+                        let rect = response.rect;
+                        let center = rect.center();
+                        // Zoomed-in scale: map [-0.25, 0.25] to canvas
+                        let scale = rect.width() * 2.0;
+
+                        let to_screen = |p: [f32; 2]| -> egui::Pos2 {
+                            egui::pos2(center.x + p[0] * scale, center.y - p[1] * scale)
+                        };
+
+                        // Background
+                        painter.rect_filled(rect, 4.0, egui::Color32::from_gray(30));
+
+                        // Grid crosshair
+                        let grid_color = egui::Color32::from_gray(55);
+                        painter.line_segment(
+                            [
+                                egui::pos2(rect.left(), center.y),
+                                egui::pos2(rect.right(), center.y),
+                            ],
+                            egui::Stroke::new(0.5, grid_color),
+                        );
+                        painter.line_segment(
+                            [
+                                egui::pos2(center.x, rect.top()),
+                                egui::pos2(center.x, rect.bottom()),
+                            ],
+                            egui::Stroke::new(0.5, grid_color),
+                        );
+
+                        // Draw iris circle (reference)
+                        let iris_screen_r = iris_radius * scale;
+                        painter.circle_stroke(
+                            center,
+                            iris_screen_r,
+                            egui::Stroke::new(1.0, egui::Color32::from_rgba_premultiplied(80, 80, 120, 100)),
+                        );
+
+                        // Draw highlight circle
+                        let hl_center = to_screen(hl_offset);
+                        let hl_screen_r = hl_radius * scale;
+                        painter.circle_filled(
+                            hl_center,
+                            hl_screen_r,
+                            egui::Color32::from_rgba_premultiplied(255, 255, 255, 180),
+                        );
+                        painter.circle_stroke(
+                            hl_center,
+                            hl_screen_r,
+                            egui::Stroke::new(1.5, egui::Color32::WHITE),
+                        );
+
+                        // Drag to move highlight position
+                        if response.dragged() {
+                            if let Some(pos) = response.interact_pointer_pos() {
+                                let u_drag = if editing_left {
+                                    &mut left.uniforms
+                                } else {
+                                    &mut right.uniforms
+                                };
+                                u_drag.highlight_offset[0] =
+                                    ((pos.x - center.x) / scale).clamp(-0.20, 0.20);
+                                u_drag.highlight_offset[1] =
+                                    (-(pos.y - center.y) / scale).clamp(-0.20, 0.20);
+                            }
+                        }
+
+                        // Sync linked fields
+                        if link_highlight.linked {
+                            sync_highlight(&*left, right);
+                        }
+                    });
+
+                ui.separator();
+
                 // --- Eye Shape ---
                 egui::CollapsingHeader::new("Eye Shape")
                     .default_open(true)
@@ -547,7 +682,6 @@ pub fn eye_control_panel(
                 egui::CollapsingHeader::new("Appearance")
                     .default_open(false)
                     .show(ui, |ui| {
-                        ui.checkbox(show_highlight, "Highlight");
                         ui.add(
                             egui::Slider::new(&mut left.uniforms.eye_separation, 0.2..=1.2)
                                 .text("Eye Separation"),

@@ -39,6 +39,8 @@ pub struct EyeSideConfig {
     pub highlight_offset: [f32; 2],
     pub highlight_radius: f32,
     pub highlight_intensity: f32,
+    #[serde(default)]
+    pub highlight_blur: f32,
     pub look_x: f32,
     pub look_y: f32,
 
@@ -218,6 +220,15 @@ pub struct LinkConfig {
     pub iris: SectionLinkConfig,
     pub eyebrow: SectionLinkConfig,
     pub eyelash: SectionLinkConfig,
+    #[serde(default = "default_link_config")]
+    pub highlight: SectionLinkConfig,
+}
+
+fn default_link_config() -> SectionLinkConfig {
+    SectionLinkConfig {
+        linked: true,
+        active: "left".to_string(),
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -431,6 +442,7 @@ impl From<&EyeSideState> for EyeSideConfig {
             highlight_offset: s.uniforms.highlight_offset,
             highlight_radius: s.uniforms.highlight_radius,
             highlight_intensity: s.uniforms.highlight_intensity,
+            highlight_blur: s.uniforms.highlight_blur,
             look_x: s.uniforms.look_x,
             look_y: s.uniforms.look_y,
             eye_shape: EyeShapeConfig::from(&s.eye_shape),
@@ -456,6 +468,7 @@ impl EyeSideConfig {
         s.uniforms.highlight_offset = self.highlight_offset;
         s.uniforms.highlight_radius = self.highlight_radius;
         s.uniforms.highlight_intensity = self.highlight_intensity;
+        s.uniforms.highlight_blur = self.highlight_blur;
         s.uniforms.look_x = self.look_x;
         s.uniforms.look_y = self.look_y;
         s.eye_shape = EyeShape::from(&self.eye_shape);
@@ -495,6 +508,7 @@ impl EyeConfig {
         link_iris: &SectionLink,
         link_eyebrow: &SectionLink,
         link_eyelash: &SectionLink,
+        link_highlight: &SectionLink,
         auto_blink: bool,
         follow_mouse: bool,
         show_highlight: bool,
@@ -525,6 +539,7 @@ impl EyeConfig {
                 iris: SectionLinkConfig::from(link_iris),
                 eyebrow: SectionLinkConfig::from(link_eyebrow),
                 eyelash: SectionLinkConfig::from(link_eyelash),
+                highlight: SectionLinkConfig::from(link_highlight),
             },
         }
     }
@@ -537,6 +552,7 @@ impl EyeConfig {
         link_iris: &mut SectionLink,
         link_eyebrow: &mut SectionLink,
         link_eyelash: &mut SectionLink,
+        link_highlight: &mut SectionLink,
         auto_blink: &mut bool,
         follow_mouse: &mut bool,
         show_highlight: &mut bool,
@@ -583,5 +599,6 @@ impl EyeConfig {
         *link_iris = self.links.iris.to_section_link();
         *link_eyebrow = self.links.eyebrow.to_section_link();
         *link_eyelash = self.links.eyelash.to_section_link();
+        *link_highlight = self.links.highlight.to_section_link();
     }
 }
