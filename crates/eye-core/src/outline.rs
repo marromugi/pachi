@@ -587,31 +587,42 @@ pub struct EyebrowGuide {
 }
 
 impl EyebrowGuide {
-    /// Derive guide positions as midpoints between paired top/bottom outline anchors.
+    /// Derive guide from outline, using top-edge handles directly.
+    ///
+    /// `from_guide_and_thickness` stores guide handles into top-edge anchors
+    /// (T0.handle_out = g[0].handle_out, T1.handle_in/out = g[1].handle_in/out,
+    /// T2.handle_in = g[2].handle_in) and swaps them for the bottom edge.
+    /// Averaging top+bottom would cancel the handles out, so we take the
+    /// top-edge handles directly to reconstruct the guide losslessly.
     pub fn from_outline(outline: &EyebrowOutline) -> Self {
-        let mid = |top_idx: usize, bot_idx: usize| -> BezierAnchor {
+        let midpos = |top_idx: usize, bot_idx: usize| -> [f32; 2] {
             let t = &outline.anchors[top_idx];
             let b = &outline.anchors[bot_idx];
-            BezierAnchor {
-                position: [
-                    (t.position[0] + b.position[0]) * 0.5,
-                    (t.position[1] + b.position[1]) * 0.5,
-                ],
-                handle_in: [
-                    (t.handle_in[0] + b.handle_in[0]) * 0.5,
-                    (t.handle_in[1] + b.handle_in[1]) * 0.5,
-                ],
-                handle_out: [
-                    (t.handle_out[0] + b.handle_out[0]) * 0.5,
-                    (t.handle_out[1] + b.handle_out[1]) * 0.5,
-                ],
-            }
+            [
+                (t.position[0] + b.position[0]) * 0.5,
+                (t.position[1] + b.position[1]) * 0.5,
+            ]
         };
         Self {
             anchors: [
-                mid(0, 5), // G0: left tip
-                mid(1, 4), // G1: center
-                mid(2, 3), // G2: right tip
+                // G0: left tip — handle_out from T0
+                BezierAnchor {
+                    position: midpos(0, 5),
+                    handle_in: [0.0, 0.0],
+                    handle_out: outline.anchors[0].handle_out,
+                },
+                // G1: center — handles from T1
+                BezierAnchor {
+                    position: midpos(1, 4),
+                    handle_in: outline.anchors[1].handle_in,
+                    handle_out: outline.anchors[1].handle_out,
+                },
+                // G2: right tip — handle_in from T2
+                BezierAnchor {
+                    position: midpos(2, 3),
+                    handle_in: outline.anchors[2].handle_in,
+                    handle_out: [0.0, 0.0],
+                },
             ],
         }
     }
