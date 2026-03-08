@@ -16,6 +16,9 @@ pub enum TimelineEasing {
     EaseIn,
     EaseOut,
     EaseInOut,
+    BounceOut,
+    ElasticOut,
+    BackOut,
 }
 
 impl TimelineEasing {
@@ -25,10 +28,21 @@ impl TimelineEasing {
             Self::EaseIn => Easing::EaseIn,
             Self::EaseOut => Easing::EaseOut,
             Self::EaseInOut => Easing::EaseInOut,
+            Self::BounceOut => Easing::BounceOut,
+            Self::ElasticOut => Easing::ElasticOut,
+            Self::BackOut => Easing::BackOut,
         }
     }
 
-    pub const ALL: [Self; 4] = [Self::Linear, Self::EaseIn, Self::EaseOut, Self::EaseInOut];
+    pub const ALL: [Self; 7] = [
+        Self::Linear,
+        Self::EaseIn,
+        Self::EaseOut,
+        Self::EaseInOut,
+        Self::BounceOut,
+        Self::ElasticOut,
+        Self::BackOut,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -36,13 +50,16 @@ impl TimelineEasing {
             Self::EaseIn => "Ease In",
             Self::EaseOut => "Ease Out",
             Self::EaseInOut => "Ease In/Out",
+            Self::BounceOut => "Bounce Out",
+            Self::ElasticOut => "Elastic Out",
+            Self::BackOut => "Back Out",
         }
     }
 }
 
 impl Default for TimelineEasing {
     fn default() -> Self {
-        Self::EaseInOut
+        Self::BackOut
     }
 }
 
@@ -71,6 +88,8 @@ pub struct TimelineKeyframe {
     /// Duration of transition FROM the previous keyframe TO this one.
     pub transition_duration: f32,
     pub easing: TimelineEasing,
+    #[serde(default)]
+    pub blink: bool,
     pub left: EyeSideConfig,
     pub right: EyeSideConfig,
     pub global: TimelineGlobalConfig,
@@ -200,27 +219,30 @@ fn lerp_eyelash_shape(
 // Interpolation: full config
 // ============================================================
 
-pub fn lerp_eye_side(a: &EyeSideConfig, b: &EyeSideConfig, t: f32) -> EyeSideConfig {
+/// Interpolate eye-side config with two t values:
+/// - `t`: general easing (may overshoot, e.g. BackOut)
+/// - `t_precise`: non-overshooting easing for iris/pupil (biologically they lock on target)
+pub fn lerp_eye_side(a: &EyeSideConfig, b: &EyeSideConfig, t: f32, t_precise: f32) -> EyeSideConfig {
     EyeSideConfig {
         sclera_color: lerp_f32_3(a.sclera_color, b.sclera_color, t),
-        iris_color: lerp_f32_3(a.iris_color, b.iris_color, t),
-        pupil_color: lerp_f32_3(a.pupil_color, b.pupil_color, t),
+        iris_color: lerp_f32_3(a.iris_color, b.iris_color, t_precise),
+        pupil_color: lerp_f32_3(a.pupil_color, b.pupil_color, t_precise),
         eyelid_close: lerp_f32(a.eyelid_close, b.eyelid_close, t),
-        iris_radius: lerp_f32(a.iris_radius, b.iris_radius, t),
-        iris_follow: lerp_f32(a.iris_follow, b.iris_follow, t),
-        iris_offset_y: lerp_f32(a.iris_offset_y, b.iris_offset_y, t),
-        pupil_radius: lerp_f32(a.pupil_radius, b.pupil_radius, t),
+        iris_radius: lerp_f32(a.iris_radius, b.iris_radius, t_precise),
+        iris_follow: lerp_f32(a.iris_follow, b.iris_follow, t_precise),
+        iris_offset_y: lerp_f32(a.iris_offset_y, b.iris_offset_y, t_precise),
+        pupil_radius: lerp_f32(a.pupil_radius, b.pupil_radius, t_precise),
         highlight_offset: lerp_f32_2(a.highlight_offset, b.highlight_offset, t),
         highlight_radius: lerp_f32(a.highlight_radius, b.highlight_radius, t),
         highlight_intensity: lerp_f32(a.highlight_intensity, b.highlight_intensity, t),
         highlight_blur: lerp_f32(a.highlight_blur, b.highlight_blur, t),
-        look_x: lerp_f32(a.look_x, b.look_x, t),
-        look_y: lerp_f32(a.look_y, b.look_y, t),
+        look_x: lerp_f32(a.look_x, b.look_x, t_precise),
+        look_y: lerp_f32(a.look_y, b.look_y, t_precise),
         eye_shape: lerp_eye_shape(&a.eye_shape, &b.eye_shape, t),
         eyebrow_shape: lerp_eyebrow_shape(&a.eyebrow_shape, &b.eyebrow_shape, t),
         eyelash_shape: lerp_eyelash_shape(&a.eyelash_shape, &b.eyelash_shape, t),
-        iris_shape: lerp_outline(&a.iris_shape, &b.iris_shape, t),
-        pupil_shape: lerp_outline(&a.pupil_shape, &b.pupil_shape, t),
+        iris_shape: lerp_outline(&a.iris_shape, &b.iris_shape, t_precise),
+        pupil_shape: lerp_outline(&a.pupil_shape, &b.pupil_shape, t_precise),
     }
 }
 
@@ -246,6 +268,7 @@ pub struct TimelineFrame {
     pub left: EyeSideConfig,
     pub right: EyeSideConfig,
     pub global: TimelineGlobalConfig,
+    pub trigger_blink: bool,
 }
 
 // ============================================================
@@ -260,6 +283,8 @@ pub struct TimelinePlayer {
     play_start_wall: f32,
     elapsed_at_pause: f32,
     pub selected_keyframe: Option<usize>,
+    /// Tracks the elapsed time up to which blink keyframes have been checked.
+    blink_cursor: f32,
 }
 
 impl TimelinePlayer {
@@ -272,6 +297,7 @@ impl TimelinePlayer {
             play_start_wall: 0.0,
             elapsed_at_pause: 0.0,
             selected_keyframe: None,
+            blink_cursor: 0.0,
         }
     }
 
@@ -286,6 +312,7 @@ impl TimelinePlayer {
         self.playing = false;
         self.elapsed = 0.0;
         self.elapsed_at_pause = 0.0;
+        self.blink_cursor = 0.0;
     }
 
     pub fn is_playing(&self) -> bool {
@@ -301,6 +328,7 @@ impl TimelinePlayer {
             return None;
         }
 
+        let prev_cursor = self.blink_cursor;
         self.elapsed = self.elapsed_at_pause + (wall_time - self.play_start_wall);
 
         let total = self.timeline.total_duration();
@@ -310,6 +338,7 @@ impl TimelinePlayer {
                 left: kf.left.clone(),
                 right: kf.right.clone(),
                 global: kf.global.clone(),
+                trigger_blink: false,
             });
         }
 
@@ -318,6 +347,7 @@ impl TimelinePlayer {
                 self.elapsed %= total;
                 self.play_start_wall = wall_time;
                 self.elapsed_at_pause = self.elapsed;
+                self.blink_cursor = 0.0;
             } else {
                 self.playing = false;
                 let kf = self.timeline.keyframes.last().unwrap();
@@ -325,11 +355,26 @@ impl TimelinePlayer {
                     left: kf.left.clone(),
                     right: kf.right.clone(),
                     global: kf.global.clone(),
+                    trigger_blink: false,
                 });
             }
         }
 
-        self.interpolate_at(self.elapsed)
+        // Check if any blink keyframe's transition_start was crossed this frame
+        let mut trigger_blink = false;
+        for kf in &self.timeline.keyframes {
+            if kf.blink {
+                let trigger_time = (kf.fire_time - kf.transition_duration).max(0.0);
+                if trigger_time > prev_cursor && trigger_time <= self.elapsed {
+                    trigger_blink = true;
+                }
+            }
+        }
+        self.blink_cursor = self.elapsed;
+
+        let mut frame = self.interpolate_at(self.elapsed)?;
+        frame.trigger_blink = trigger_blink;
+        Some(frame)
     }
 
     fn interpolate_at(&self, t: f32) -> Option<TimelineFrame> {
@@ -344,6 +389,7 @@ impl TimelinePlayer {
                 left: kfs[0].left.clone(),
                 right: kfs[0].right.clone(),
                 global: kfs[0].global.clone(),
+                trigger_blink: false,
             });
         }
 
@@ -362,6 +408,7 @@ impl TimelinePlayer {
                         left: prev.left.clone(),
                         right: prev.right.clone(),
                         global: prev.global.clone(),
+                        trigger_blink: false,
                     });
                 }
 
@@ -375,11 +422,15 @@ impl TimelinePlayer {
                 };
 
                 let eased_t = apply_easing(raw_t, curr.easing.to_easing());
+                // Iris/pupil complete in 1/3 of the transition time, then hold at target
+                let fast_t = (raw_t * 4.0).clamp(0.0, 1.0);
+                let precise_t = apply_easing(fast_t, Easing::EaseOut);
 
                 return Some(TimelineFrame {
-                    left: lerp_eye_side(&prev.left, &curr.left, eased_t),
-                    right: lerp_eye_side(&prev.right, &curr.right, eased_t),
+                    left: lerp_eye_side(&prev.left, &curr.left, eased_t, precise_t),
+                    right: lerp_eye_side(&prev.right, &curr.right, eased_t, precise_t),
                     global: lerp_timeline_global(&prev.global, &curr.global, eased_t),
+                    trigger_blink: false,
                 });
             }
         }
@@ -390,6 +441,7 @@ impl TimelinePlayer {
             left: last.left.clone(),
             right: last.right.clone(),
             global: last.global.clone(),
+            trigger_blink: false,
         })
     }
 }
