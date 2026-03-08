@@ -3,7 +3,7 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use eye::gui::{eye_control_panel, EyeSideState, GuiActions, SectionLink};
-use eye::{BlinkAnimation, EyeConfig, EyePairUniforms, EyeRenderer, ListeningNod, MicrosaccadeAnimation, NodAnimation};
+use eye::{BlinkAnimation, EyeConfig, EyePairUniforms, EyeRenderer, ListeningNod, MicrosaccadeAnimation, NodAnimation, Timeline, TimelinePlayer};
 use winit::application::ApplicationHandler;
 use winit::event::{ElementState, KeyEvent, WindowEvent};
 use winit::event_loop::{ActiveEventLoop, EventLoop};
@@ -246,6 +246,9 @@ struct AppState {
     audio_state: Arc<Mutex<AudioState>>,
     listening_nod: ListeningNod,
 
+    // Timeline
+    timeline_player: TimelinePlayer,
+
     // egui
     egui_ctx: egui::Context,
     egui_state: egui_winit::State,
@@ -356,6 +359,7 @@ impl ApplicationHandler for App {
                 ws_gaze: Arc::new(Mutex::new(WsGazeState::default())),
                 audio_state: Arc::new(Mutex::new(AudioState::default())),
                 listening_nod: ListeningNod::default(),
+                timeline_player: TimelinePlayer::new(),
                 egui_ctx,
                 egui_state,
                 egui_renderer,
@@ -531,6 +535,36 @@ impl ApplicationHandler for App {
                 state.right.uniforms.aspect_ratio = aspect;
                 state.right.uniforms.time = time;
 
+                // --- Timeline playback (takes priority over all other animations) ---
+                let timeline_active = state.timeline_player.is_playing();
+                if let Some(frame) = state.timeline_player.evaluate(time) {
+                    frame.left.apply_to(&mut state.left);
+                    frame.right.apply_to(&mut state.right);
+                    // Apply global params
+                    state.left.uniforms.bg_color = frame.global.bg_color;
+                    state.left.uniforms.eye_separation = frame.global.eye_separation;
+                    state.left.uniforms.max_angle = frame.global.max_angle;
+                    state.left.uniforms.eye_angle = frame.global.eye_angle;
+                    state.right.uniforms.bg_color = frame.global.bg_color;
+                    state.right.uniforms.eye_separation = frame.global.eye_separation;
+                    state.right.uniforms.max_angle = frame.global.max_angle;
+                    state.right.uniforms.eye_angle = frame.global.eye_angle;
+                    state.focus_distance = frame.global.focus_distance;
+                    // Restore runtime-only fields
+                    state.left.uniforms.aspect_ratio = aspect;
+                    state.left.uniforms.time = time;
+                    state.right.uniforms.aspect_ratio = aspect;
+                    state.right.uniforms.time = time;
+                }
+
+                // When timeline is active, skip all other animations
+                let ws_active;
+                if timeline_active {
+                    state.left.uniforms.squash_stretch = 0.0;
+                    state.right.uniforms.squash_stretch = 0.0;
+                    ws_active = false;
+                } else {
+
                 // Auto-blink: applies to both eyes (skip when paused)
                 if state.auto_blink && !state.pause_animation {
                     let eyelid_now = state.blink_animation.evaluate(time);
@@ -554,7 +588,7 @@ impl ApplicationHandler for App {
                 }
 
                 // Gaze input: WebSocket takes priority over mouse follow
-                let ws_active = state
+                ws_active = state
                     .ws_gaze
                     .lock()
                     .map(|ws| {
@@ -665,6 +699,8 @@ impl ApplicationHandler for App {
                     }
                 }
 
+                } // end of !timeline_active block
+
                 // Sync shapes into respective uniforms
                 state.left.uniforms.outline_open =
                     state.left.eye_shape.open.to_uniform_array();
@@ -742,6 +778,7 @@ impl ApplicationHandler for App {
                             &mut state.listening_nod,
                             audio_rms,
                             ws_active,
+                            &mut state.timeline_player,
                         );
                     }
                 });
@@ -812,6 +849,71 @@ impl ApplicationHandler for App {
                                 Err(e) => eprintln!("Invalid config JSON: {e}"),
                             },
                             Err(e) => eprintln!("Failed to read config file: {e}"),
+                        }
+                    }
+                }
+
+                // Timeline export/import
+                if gui_actions.timeline_export_requested {
+                    if let Ok(json) = state.timeline_player.timeline.to_json() {
+                        let file = rfd::FileDialog::new()
+                            .set_title("Export Timeline")
+                            .add_filter("JSON", &["json"])
+                            .set_file_name("eye_timeline.json")
+                            .save_file();
+                        if let Some(path) = file {
+                            if let Err(e) = std::fs::write(&path, &json) {
+                                eprintln!("Failed to write timeline: {e}");
+                            }
+                        }
+                    }
+                }
+
+                if gui_actions.timeline_import_requested {
+                    let file = rfd::FileDialog::new()
+                        .set_title("Import Timeline")
+                        .add_filter("JSON", &["json"])
+                        .pick_file();
+                    if let Some(path) = file {
+                        match std::fs::read_to_string(&path) {
+                            Ok(json) => match Timeline::from_json(&json) {
+                                Ok(timeline) => {
+                                    state.timeline_player.timeline = timeline;
+                                    state.timeline_player.selected_keyframe = None;
+                                }
+                                Err(e) => eprintln!("Invalid timeline JSON: {e}"),
+                            },
+                            Err(e) => eprintln!("Failed to read timeline file: {e}"),
+                        }
+                    }
+                }
+
+                // Load config file into a specific keyframe
+                if let Some(kf_idx) = gui_actions.timeline_load_file_into_keyframe {
+                    if kf_idx < state.timeline_player.timeline.keyframes.len() {
+                        let file = rfd::FileDialog::new()
+                            .set_title("Load Config into Keyframe")
+                            .add_filter("JSON", &["json"])
+                            .pick_file();
+                        if let Some(path) = file {
+                            match std::fs::read_to_string(&path) {
+                                Ok(json) => match EyeConfig::from_json(&json) {
+                                    Ok(config) => {
+                                        let kf = &mut state.timeline_player.timeline.keyframes[kf_idx];
+                                        kf.left = config.left;
+                                        kf.right = config.right;
+                                        kf.global = eye::TimelineGlobalConfig {
+                                            bg_color: config.global.bg_color,
+                                            eye_separation: config.global.eye_separation,
+                                            max_angle: config.global.max_angle,
+                                            eye_angle: config.global.eye_angle,
+                                            focus_distance: config.global.focus_distance,
+                                        };
+                                    }
+                                    Err(e) => eprintln!("Invalid config JSON: {e}"),
+                                },
+                                Err(e) => eprintln!("Failed to read config file: {e}"),
+                            }
                         }
                     }
                 }
@@ -927,7 +1029,7 @@ impl ApplicationHandler for App {
 
                 // Only request next frame when animation is running and not paused
                 if !state.pause_animation
-                    && (state.auto_blink || ws_active || state.nod_animation.is_active() || state.listening_nod.enabled)
+                    && (state.auto_blink || ws_active || state.nod_animation.is_active() || state.listening_nod.enabled || state.timeline_player.is_playing())
                 {
                     state.window.request_redraw();
                 }

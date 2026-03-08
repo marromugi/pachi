@@ -1,8 +1,10 @@
 use egui;
 
+use crate::config::EyeSideConfig;
 use crate::listening::ListeningNod;
 use crate::nod::NodAnimation;
 use crate::outline::{BezierAnchor, BezierOutline, EyelashShape, EyeShape, EyebrowShape, IrisShape, PupilShape};
+use crate::timeline::{TimelineEasing, TimelineGlobalConfig, TimelineKeyframe, TimelinePlayer};
 use crate::EyeUniforms;
 
 // ============================================================
@@ -14,6 +16,10 @@ pub struct GuiActions {
     pub export_requested: bool,
     pub import_requested: bool,
     pub nod_triggered: bool,
+    pub timeline_export_requested: bool,
+    pub timeline_import_requested: bool,
+    /// Load a config file into the keyframe at this index.
+    pub timeline_load_file_into_keyframe: Option<usize>,
 }
 
 // ============================================================
@@ -174,6 +180,7 @@ pub fn eye_control_panel(
     listening_nod: &mut ListeningNod,
     audio_rms: f32,
     ws_connected: bool,
+    timeline_player: &mut TimelinePlayer,
 ) -> GuiActions {
     let mut actions = GuiActions::default();
     egui::SidePanel::right("eye_controls")
@@ -798,6 +805,11 @@ pub fn eye_control_panel(
 
                 ui.separator();
 
+                // --- Timeline ---
+                timeline_panel(ui, timeline_player, left, right, *focus_distance, &mut actions);
+
+                ui.separator();
+
                 if ui.button("Reset All").clicked() {
                     let aspect = left.uniforms.aspect_ratio;
                     let time = left.uniforms.time;
@@ -824,6 +836,210 @@ pub fn eye_control_panel(
             });
         });
     actions
+}
+
+// ============================================================
+// Timeline panel
+// ============================================================
+
+fn timeline_panel(
+    ui: &mut egui::Ui,
+    player: &mut TimelinePlayer,
+    left: &mut EyeSideState,
+    right: &mut EyeSideState,
+    focus_distance: f32,
+    actions: &mut GuiActions,
+) {
+    egui::CollapsingHeader::new("Timeline")
+        .default_open(false)
+        .show(ui, |ui| {
+            let total = player.timeline.total_duration();
+
+            // Transport controls
+            ui.horizontal(|ui| {
+                if player.is_playing() {
+                    if ui.button("Stop").clicked() {
+                        player.stop();
+                    }
+                } else if ui.button("Play").clicked() {
+                    if !player.timeline.keyframes.is_empty() {
+                        let wall = left.uniforms.time;
+                        player.play(wall);
+                    }
+                }
+                ui.checkbox(&mut player.looping, "Loop");
+            });
+
+            // Progress bar
+            if total > 0.0 {
+                let progress = if player.is_playing() {
+                    player.current_time() / total
+                } else {
+                    0.0
+                };
+                let bar = egui::ProgressBar::new(progress.clamp(0.0, 1.0))
+                    .text(format!("{:.1}s / {:.1}s", player.current_time(), total));
+                ui.add(bar);
+            }
+
+            ui.separator();
+            ui.label("Keyframes:");
+
+            // Keyframe list
+            let kf_count = player.timeline.keyframes.len();
+            let mut delete_idx: Option<usize> = None;
+
+            egui::ScrollArea::vertical()
+                .max_height(150.0)
+                .id_salt("timeline_keyframes")
+                .show(ui, |ui| {
+                    for i in 0..kf_count {
+                        let kf = &player.timeline.keyframes[i];
+                        let is_selected = player.selected_keyframe == Some(i);
+                        let text = format!(
+                            "{}: \"{}\" @{:.2}s  {:.2}s  {}",
+                            i,
+                            kf.label,
+                            kf.fire_time,
+                            kf.transition_duration,
+                            kf.easing.label()
+                        );
+                        if ui.selectable_label(is_selected, &text).clicked() {
+                            player.selected_keyframe = Some(i);
+                        }
+                    }
+                });
+
+            // Add keyframe button
+            if ui.button("+ Add Keyframe").clicked() {
+                let fire_time = if player.timeline.keyframes.is_empty() {
+                    0.0
+                } else {
+                    total + 1.0
+                };
+                let kf = TimelineKeyframe {
+                    label: format!("keyframe {}", kf_count),
+                    fire_time,
+                    transition_duration: 0.5,
+                    easing: TimelineEasing::default(),
+                    left: EyeSideConfig::from(&*left),
+                    right: EyeSideConfig::from(&*right),
+                    global: TimelineGlobalConfig {
+                        bg_color: left.uniforms.bg_color,
+                        eye_separation: left.uniforms.eye_separation,
+                        max_angle: left.uniforms.max_angle,
+                        eye_angle: left.uniforms.eye_angle,
+                        focus_distance,
+                    },
+                };
+                player.timeline.keyframes.push(kf);
+                player.selected_keyframe = Some(kf_count);
+                player.timeline.sort();
+                // Re-find selected after sort
+                if let Some(sel) = player.selected_keyframe {
+                    if sel < player.timeline.keyframes.len() {
+                        // Keep selection, it may have moved
+                        let target_label =
+                            format!("keyframe {}", kf_count);
+                        for (j, k) in player.timeline.keyframes.iter().enumerate() {
+                            if k.label == target_label {
+                                player.selected_keyframe = Some(j);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Selected keyframe editor
+            if let Some(sel_idx) = player.selected_keyframe {
+                if sel_idx < player.timeline.keyframes.len() {
+                    ui.separator();
+                    ui.label(format!("Selected: #{}", sel_idx));
+
+                    let kf = &mut player.timeline.keyframes[sel_idx];
+
+                    ui.horizontal(|ui| {
+                        ui.label("Label:");
+                        ui.text_edit_singleline(&mut kf.label);
+                    });
+                    ui.add(
+                        egui::Slider::new(&mut kf.fire_time, 0.0..=30.0)
+                            .text("Fire Time (s)")
+                            .clamping(egui::SliderClamping::Never),
+                    );
+                    ui.add(
+                        egui::Slider::new(&mut kf.transition_duration, 0.0..=10.0)
+                            .text("Transition (s)")
+                            .clamping(egui::SliderClamping::Never),
+                    );
+
+                    // Easing dropdown
+                    egui::ComboBox::from_label("Easing")
+                        .selected_text(kf.easing.label())
+                        .show_ui(ui, |ui| {
+                            for e in TimelineEasing::ALL {
+                                ui.selectable_value(&mut kf.easing, e, e.label());
+                            }
+                        });
+
+                    ui.horizontal(|ui| {
+                        // Preview: apply this keyframe's config to the editor
+                        if ui.button("Preview").clicked() {
+                            kf.left.apply_to(left);
+                            kf.right.apply_to(right);
+                        }
+
+                        // Capture: overwrite this keyframe with current state
+                        if ui.button("Capture").clicked() {
+                            kf.left = EyeSideConfig::from(&*left);
+                            kf.right = EyeSideConfig::from(&*right);
+                            kf.global = TimelineGlobalConfig {
+                                bg_color: left.uniforms.bg_color,
+                                eye_separation: left.uniforms.eye_separation,
+                                max_angle: left.uniforms.max_angle,
+                                eye_angle: left.uniforms.eye_angle,
+                                focus_distance,
+                            };
+                        }
+
+                        // Load from config file
+                        if ui.button("Load File").clicked() {
+                            actions.timeline_load_file_into_keyframe = Some(sel_idx);
+                        }
+
+                        if ui.button("Delete").clicked() {
+                            delete_idx = Some(sel_idx);
+                        }
+                    });
+                }
+            }
+
+            // Handle deferred delete
+            if let Some(idx) = delete_idx {
+                player.timeline.keyframes.remove(idx);
+                if player.timeline.keyframes.is_empty() {
+                    player.selected_keyframe = None;
+                } else if let Some(sel) = player.selected_keyframe {
+                    if sel >= player.timeline.keyframes.len() {
+                        player.selected_keyframe = Some(player.timeline.keyframes.len() - 1);
+                    }
+                }
+            }
+
+            // Re-sort after edits (fire_time may have changed)
+            player.timeline.sort();
+
+            ui.separator();
+            ui.horizontal(|ui| {
+                if ui.button("Export Timeline").clicked() {
+                    actions.timeline_export_requested = true;
+                }
+                if ui.button("Import Timeline").clicked() {
+                    actions.timeline_import_requested = true;
+                }
+            });
+        });
 }
 
 // ============================================================
@@ -1060,6 +1276,7 @@ fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_
 
     // --- Draw Bezier curve segments ---
     let curve_color = egui::Color32::from_rgb(220, 220, 220);
+    let curve_stroke = egui::Stroke::new(2.0, curve_color);
     let anchors = &outline.anchors;
     for seg in 0..4 {
         let next = (seg + 1) % 4;
@@ -1070,8 +1287,9 @@ fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_
         let p3 = b.position;
         let p2 = [p3[0] + b.handle_in[0], p3[1] + b.handle_in[1]];
 
-        let subdiv = 24;
-        let mut prev = to_screen(p0);
+        let subdiv = 16;
+        let mut points = Vec::with_capacity(subdiv + 1);
+        points.push(to_screen(p0));
         for j in 1..=subdiv {
             let t = j as f32 / subdiv as f32;
             let omt = 1.0 - t;
@@ -1083,10 +1301,9 @@ fn bezier_outline_editor(ui: &mut egui::Ui, outline: &mut BezierOutline, editor_
                 + 3.0 * omt * omt * t * p1[1]
                 + 3.0 * omt * t * t * p2[1]
                 + t * t * t * p3[1];
-            let curr = to_screen([x, y]);
-            painter.line_segment([prev, curr], egui::Stroke::new(2.0, curve_color));
-            prev = curr;
+            points.push(to_screen([x, y]));
         }
+        painter.add(egui::Shape::line(points, curve_stroke));
     }
 
     // --- Draw handle lines and handle points ---
