@@ -5,6 +5,9 @@ pub enum Easing {
     EaseIn,
     EaseOut,
     EaseInOut,
+    BounceOut,
+    ElasticOut,
+    BackOut,
 }
 
 pub fn apply_easing(t: f32, easing: Easing) -> f32 {
@@ -19,7 +22,44 @@ pub fn apply_easing(t: f32, easing: Easing) -> f32 {
                 1.0 - (-2.0 * t + 2.0).powi(2) / 2.0
             }
         }
+        Easing::BounceOut => bounce_out(t),
+        Easing::ElasticOut => elastic_out(t),
+        Easing::BackOut => back_out(t),
     }
+}
+
+fn bounce_out(t: f32) -> f32 {
+    const N1: f32 = 7.5625;
+    const D1: f32 = 2.75;
+    if t < 1.0 / D1 {
+        N1 * t * t
+    } else if t < 2.0 / D1 {
+        let t = t - 1.5 / D1;
+        N1 * t * t + 0.75
+    } else if t < 2.5 / D1 {
+        let t = t - 2.25 / D1;
+        N1 * t * t + 0.9375
+    } else {
+        let t = t - 2.625 / D1;
+        N1 * t * t + 0.984375
+    }
+}
+
+fn elastic_out(t: f32) -> f32 {
+    if t <= 0.0 {
+        return 0.0;
+    }
+    if t >= 1.0 {
+        return 1.0;
+    }
+    let p = 0.3_f32;
+    2.0_f32.powf(-10.0 * t) * ((t - p / 4.0) * (std::f32::consts::TAU / p)).sin() + 1.0
+}
+
+fn back_out(t: f32) -> f32 {
+    let s: f32 = 1.70158;
+    let t = t - 1.0;
+    t * t * ((s + 1.0) * t + s) + 1.0
 }
 
 /// Lightweight xorshift32 PRNG (no external crate needed).
@@ -125,6 +165,16 @@ impl BlinkAnimation {
     /// scheduling timeline.
     pub fn peek_value(&self, t: f32) -> f32 {
         self.compute_value(t)
+    }
+
+    /// Returns `true` if a blink is currently in progress at time `t`.
+    pub fn is_blinking(&self, t: f32) -> bool {
+        if let Some(ref blink) = self.current_blink {
+            let elapsed = t - blink.start_time;
+            elapsed >= 0.0 && elapsed < blink.total_duration()
+        } else {
+            false
+        }
     }
 
     /// Internal: update scheduling (generate new blinks as needed).

@@ -248,6 +248,7 @@ struct AppState {
 
     // Timeline
     timeline_player: TimelinePlayer,
+    prev_timeline_eyelid: f32,
 
     // egui
     egui_ctx: egui::Context,
@@ -360,6 +361,7 @@ impl ApplicationHandler for App {
                 audio_state: Arc::new(Mutex::new(AudioState::default())),
                 listening_nod: ListeningNod::default(),
                 timeline_player: TimelinePlayer::new(),
+                prev_timeline_eyelid: 0.0,
                 egui_ctx,
                 egui_state,
                 egui_renderer,
@@ -538,6 +540,11 @@ impl ApplicationHandler for App {
                 // --- Timeline playback (takes priority over all other animations) ---
                 let timeline_active = state.timeline_player.is_playing();
                 if let Some(frame) = state.timeline_player.evaluate(time) {
+                    // Trigger blink if a blink keyframe was crossed
+                    if frame.trigger_blink {
+                        state.blink_animation.trigger(time);
+                    }
+
                     frame.left.apply_to(&mut state.left);
                     frame.right.apply_to(&mut state.right);
                     // Apply global params
@@ -555,13 +562,29 @@ impl ApplicationHandler for App {
                     state.left.uniforms.time = time;
                     state.right.uniforms.aspect_ratio = aspect;
                     state.right.uniforms.time = time;
+
+                    // Overlay blink on top of timeline eyelid_close
+                    if state.blink_animation.is_blinking(time) {
+                        let blink_value = state.blink_animation.peek_value(time);
+                        let eyelid = f32::max(state.left.uniforms.eyelid_close, blink_value);
+                        state.left.uniforms.eyelid_close = eyelid;
+                        state.right.uniforms.eyelid_close = eyelid;
+                    }
                 }
 
                 // When timeline is active, skip all other animations
                 let ws_active;
                 if timeline_active {
-                    state.left.uniforms.squash_stretch = 0.0;
-                    state.right.uniforms.squash_stretch = 0.0;
+                    // Squash & stretch driven by eyelid velocity during timeline playback
+                    let eyelid_now = state.left.uniforms.eyelid_close;
+                    let dt = 1.0 / 60.0_f32;
+                    let velocity = (eyelid_now - state.prev_timeline_eyelid) / dt;
+                    const SQUASH_STRENGTH: f32 = 0.08;
+                    const MAX_SQUASH: f32 = 0.045;
+                    let squash = (velocity * SQUASH_STRENGTH).clamp(-MAX_SQUASH, MAX_SQUASH);
+                    state.left.uniforms.squash_stretch = squash;
+                    state.right.uniforms.squash_stretch = squash;
+                    state.prev_timeline_eyelid = eyelid_now;
                     ws_active = false;
                 } else {
 

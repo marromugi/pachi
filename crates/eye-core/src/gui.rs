@@ -896,13 +896,15 @@ fn timeline_panel(
                     for i in 0..kf_count {
                         let kf = &player.timeline.keyframes[i];
                         let is_selected = player.selected_keyframe == Some(i);
+                        let blink_mark = if kf.blink { " [B]" } else { "" };
                         let text = format!(
-                            "{}: \"{}\" @{:.2}s  {:.2}s  {}",
+                            "{}: \"{}\" @{:.2}s  {:.2}s  {}{}",
                             i,
                             kf.label,
                             kf.fire_time,
                             kf.transition_duration,
-                            kf.easing.label()
+                            kf.easing.label(),
+                            blink_mark
                         );
                         if ui.selectable_label(is_selected, &text).clicked() {
                             player.selected_keyframe = Some(i);
@@ -922,6 +924,7 @@ fn timeline_panel(
                     fire_time,
                     transition_duration: 0.5,
                     easing: TimelineEasing::default(),
+                    blink: false,
                     left: EyeSideConfig::from(&*left),
                     right: EyeSideConfig::from(&*right),
                     global: TimelineGlobalConfig {
@@ -982,6 +985,8 @@ fn timeline_panel(
                                 ui.selectable_value(&mut kf.easing, e, e.label());
                             }
                         });
+
+                    ui.checkbox(&mut kf.blink, "Blink");
 
                     ui.horizontal(|ui| {
                         // Preview: apply this keyframe's config to the editor
@@ -1961,6 +1966,7 @@ fn eyebrow_guide_editor(
     let select_ring_color = egui::Color32::from_rgb(100, 180, 255);
 
     // --- Draw outline curve (red, 6 segments closed, preview only) ---
+    let outline_stroke = egui::Stroke::new(2.0, outline_curve_color);
     for seg in 0..6 {
         let next = (seg + 1) % 6;
         let a = &shape.outline.anchors[seg];
@@ -1970,8 +1976,9 @@ fn eyebrow_guide_editor(
         let p3 = b.position;
         let p2 = [p3[0] + b.handle_in[0], p3[1] + b.handle_in[1]];
 
-        let subdiv = 24;
-        let mut prev_pt = to_screen(p0);
+        let subdiv = 16;
+        let mut points = Vec::with_capacity(subdiv + 1);
+        points.push(to_screen(p0));
         for j in 1..=subdiv {
             let t = j as f32 / subdiv as f32;
             let omt = 1.0 - t;
@@ -1983,13 +1990,13 @@ fn eyebrow_guide_editor(
                 + 3.0 * omt * omt * t * p1[1]
                 + 3.0 * omt * t * t * p2[1]
                 + t * t * t * p3[1];
-            let curr = to_screen([x, y]);
-            painter.line_segment([prev_pt, curr], egui::Stroke::new(2.0, outline_curve_color));
-            prev_pt = curr;
+            points.push(to_screen([x, y]));
         }
+        painter.add(egui::Shape::line(points, outline_stroke));
     }
 
     // --- Draw guide curve (blue, 2 segments open) ---
+    let guide_stroke = egui::Stroke::new(1.5, guide_curve_color);
     for seg in 0..2 {
         let a = &shape.guide.anchors[seg];
         let b = &shape.guide.anchors[seg + 1];
@@ -1998,8 +2005,9 @@ fn eyebrow_guide_editor(
         let p3 = b.position;
         let p2 = [p3[0] + b.handle_in[0], p3[1] + b.handle_in[1]];
 
-        let subdiv = 24;
-        let mut prev_pt = to_screen(p0);
+        let subdiv = 16;
+        let mut points = Vec::with_capacity(subdiv + 1);
+        points.push(to_screen(p0));
         for j in 1..=subdiv {
             let t = j as f32 / subdiv as f32;
             let omt = 1.0 - t;
@@ -2011,10 +2019,9 @@ fn eyebrow_guide_editor(
                 + 3.0 * omt * omt * t * p1[1]
                 + 3.0 * omt * t * t * p2[1]
                 + t * t * t * p3[1];
-            let curr = to_screen([x, y]);
-            painter.line_segment([prev_pt, curr], egui::Stroke::new(1.5, guide_curve_color));
-            prev_pt = curr;
+            points.push(to_screen([x, y]));
         }
+        painter.add(egui::Shape::line(points, guide_stroke));
     }
 
     // --- Draw guide handles and anchors ---
