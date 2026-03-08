@@ -2,7 +2,8 @@
 
 A real-time 3D eye renderer built with Rust and wgpu.
 
-https://github.com/user-attachments/assets/0e9f7275-b810-4117-87a6-af7fec657de5
+https://github.com/user-attachments/assets/05a7ae26-2fb3-4914-93df-e12aed7d2aa3
+
 
 ## Features
 
